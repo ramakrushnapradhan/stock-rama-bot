@@ -1,0 +1,49 @@
+name: Stock Rama NSE Insider Alerts
+
+on:
+  schedule:
+    # GitHub Actions cron uses UTC. 03:45–10:15 UTC is approximately
+    # 09:15–15:45 India time, every 10 minutes, Monday through Friday.
+    - cron: "*/10 3-10 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: stock-rama-bot
+  cancel-in-progress: false
+
+jobs:
+  run-insider-alerts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run NSE insider trading monitor
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ vars.TELEGRAM_CHAT_ID }}
+          NSE_PIT_API_URL: ${{ vars.NSE_PIT_API_URL }}
+          MIN_VALUE_INR: "5000000"
+          LOOKBACK_DAYS: "7"
+          STATE_FILE: alerted_transactions.json
+        run: python nse_insider_bot.py
+
+      - name: Save alert deduplication state
+        if: always()
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: update insider alert state"
+          file_pattern: alerted_transactions.json
