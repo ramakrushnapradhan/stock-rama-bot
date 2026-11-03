@@ -6,6 +6,7 @@ import {
   tickSizeForPrice,
   roundDownTick,
   isNseTradingWindow,
+  approvalStatusForAction,
 } from "./worker.mjs";
 
 test("accepts a correctly sized proposal inside the ₹100–₹1,500 limits", () => {
@@ -56,4 +57,9 @@ test("constant-time comparator accepts exact values and rejects different values
   assert.equal(constantTimeEqual("secret", "secret"), true);
   assert.equal(constantTimeEqual("secret", "secreT"), false);
   assert.equal(constantTimeEqual("", "x"), false);
+});
+
+test("Telegram approval queues only; it never executes a broker order in the Worker", () => {
+  assert.equal(approvalStatusForAction("approve"), "APPROVED_PENDING_STATIC_IP_EXECUTOR");
+  assert.equal(approvalStatusForAction("reject"), "REJECTED");
 });
