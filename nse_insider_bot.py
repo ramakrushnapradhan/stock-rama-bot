@@ -84,7 +84,7 @@ def to_number(value) -> float:
         return 0.0
     if isinstance(value, (int, float)):
         return float(value)
-    text = re.sub(r"[^0-9.\\-]", "", str(value).replace(",", ""))
+    text = re.sub(r"[^0-9.-]", "", str(value).replace(",", ""))
     try:
         return float(text) if text else 0.0
     except ValueError:
