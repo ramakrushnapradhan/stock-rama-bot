@@ -118,6 +118,46 @@ async function setSetting(env, key, value) {
   ).bind(key, String(value)).run();
 }
 
+function toBase64(bytes) {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function fromBase64(value) {
+  return Uint8Array.from(atob(value), (character) => character.charCodeAt(0));
+}
+
+async function encryptionKey(env) {
+  requireEnv(env, ["KITE_TOKEN_ENCRYPTION_KEY"]);
+  const raw = fromBase64(env.KITE_TOKEN_ENCRYPTION_KEY);
+  if (raw.byteLength !== 32) throw new Error("KITE_TOKEN_ENCRYPTION_KEY must be a base64-encoded 32-byte key");
+  return crypto.subtle.importKey("raw", raw, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
+}
+
+async function setKiteAccessToken(env, token) {
+  const key = await encryptionKey(env);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const encrypted = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(token));
+  await setSetting(env, "kite_access_token", "v1." + toBase64(iv) + "." + toBase64(new Uint8Array(encrypted)));
+}
+
+async function getKiteAccessToken(env) {
+  const stored = await getSetting(env, "kite_access_token");
+  if (!stored) return null;
+  const parts = stored.split(".");
+  if (parts.length !== 3 || parts[0] !== "v1") {
+    throw new Error("Stored Kite token format is invalid; authenticate again after configuring KITE_TOKEN_ENCRYPTION_KEY");
+  }
+  const key = await encryptionKey(env);
+  const decrypted = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: fromBase64(parts[1]) },
+    key,
+    fromBase64(parts[2])
+  );
+  return new TextDecoder().decode(decrypted);
+}
+
 function authBearer(request, env) {
   const header = request.headers.get("authorization") || "";
   return Boolean(env.INTERNAL_API_TOKEN) && constantTimeEqual(header, "Bearer " + env.INTERNAL_API_TOKEN);
@@ -125,7 +165,7 @@ function authBearer(request, env) {
 
 async function kiteRequest(env, path, { method = "GET", form = null } = {}) {
   requireEnv(env, ["KITE_API_KEY"]);
-  const accessToken = await getSetting(env, "kite_access_token");
+  const accessToken = await getKiteAccessToken(env);
   if (!accessToken) throw new Error("Zerodha session is missing or expired. Open /kite/login and sign in again.");
   const headers = {
     "X-Kite-Version": "3",
@@ -163,7 +203,7 @@ async function exchangeRequestToken(env, requestToken) {
   if (!response.ok || result.status !== "success" || !result.data?.access_token) {
     throw new Error(result.message || "Kite login token exchange failed");
   }
-  await setSetting(env, "kite_access_token", result.data.access_token);
+  await setKiteAccessToken(env, result.data.access_token);
   await setSetting(env, "kite_login_date_utc", new Date().toISOString().slice(0, 10));
   return result.data;
 }
@@ -514,7 +554,7 @@ async function monitorGtts(env) {
 }
 
 async function scheduledHandler(env) {
-  if (!await getSetting(env, "kite_access_token")) return;
+  if (!await getKiteAccessToken(env)) return;
   try {
     await protectFilledBuys(env);
     await monitorGtts(env);
@@ -545,7 +585,7 @@ async function setTelegramWebhook(request, env) {
 
 async function kiteStatus(request, env) {
   if (!authBearer(request, env)) return json({ error: "Unauthorized" }, 401);
-  const token = await getSetting(env, "kite_access_token");
+  const token = await getKiteAccessToken(env);
   if (!token) return json({ kite_session: "missing", live_trading_enabled: String(env.LIVE_TRADING_ENABLED) === "true" });
   try {
     const profile = await kiteGet(env, "/user/profile");
