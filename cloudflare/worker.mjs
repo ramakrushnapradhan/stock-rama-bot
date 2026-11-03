@@ -282,7 +282,7 @@ export default {
     const url = new URL(request.url);
     try {
       if (request.method === "GET" && url.pathname === "/health") {
-        return json({ ok: true, service: "stock-rama-approval", live_trading_enabled: String(env.LIVE_TRADING_ENABLED) === "true" });
+        return json({ ok: true, service: "stock-rama-approval", broker_order_execution: false, mode: "telegram-approval-only" });
       }
       if (request.method === "POST" && url.pathname === "/proposals") return await createProposal(request, env);
       if (request.method === "POST" && url.pathname === "/telegram/webhook") return await handleTelegramWebhook(request, env);
