@@ -5,6 +5,9 @@ on:
   schedule:
     - cron: "0 16 * * 1-5"
   workflow_dispatch:
+  push:
+    branches:
+      - main
 
 permissions:
   contents: write
@@ -29,6 +32,9 @@ jobs:
 
       - name: Install dependencies
         run: pip install -r requirements.txt
+
+      - name: Run swing strategy unit tests
+        run: python -m unittest -v test_swing_strategy.py
 
       - name: Run daily NSE insider trading monitor
         env:
