@@ -164,18 +164,33 @@ def execute_approved_trade(trade_id: str, payload: dict):
             row = conn.execute("SELECT status FROM trades WHERE trade_id=?", (trade_id,)).fetchone()
             if not row or row["status"] != "SUBMITTING":
                 return
-        order_id = kite.place_order(
-            variety=kite.VARIETY_REGULAR,
-            exchange=kite.EXCHANGE_NSE,
-            tradingsymbol=payload["symbol"],
-            transaction_type=kite.TRANSACTION_TYPE_BUY,
-            quantity=int(payload["quantity"]),
-            product=kite.PRODUCT_CNC,
-            order_type=kite.ORDER_TYPE_LIMIT,
-            price=round_down_tick(float(payload["entry"])),
-            validity=kite.VALIDITY_DAY,
-            tag=("SR" + trade_id.replace("-", "")[:10])[:20],
-        )
+        buy_tag = ("SR" + trade_id.replace("-", "")[:10])[:20]
+        # Reconcile by deterministic broker tag before submitting. This prevents
+        # duplicate buys if the process died after Zerodha accepted the request.
+        prior = next((o for o in kite.orders() if o.get("tag") == buy_tag), None)
+        if prior:
+            order_id = str(prior["order_id"])
+        else:
+            try:
+                order_id = kite.place_order(
+                    variety=kite.VARIETY_REGULAR,
+                    exchange=kite.EXCHANGE_NSE,
+                    tradingsymbol=payload["symbol"],
+                    transaction_type=kite.TRANSACTION_TYPE_BUY,
+                    quantity=int(payload["quantity"]),
+                    product=kite.PRODUCT_CNC,
+                    order_type=kite.ORDER_TYPE_LIMIT,
+                    price=round_down_tick(float(payload["entry"])),
+                    validity=kite.VALIDITY_DAY,
+                    tag=buy_tag,
+                )
+            except Exception:
+                # The HTTP response may be lost after the broker accepted it.
+                # Check the broker book before ever considering a retry.
+                recovered = next((o for o in kite.orders() if o.get("tag") == buy_tag), None)
+                if not recovered:
+                    raise
+                order_id = str(recovered["order_id"])
         with db() as conn:
             conn.execute("UPDATE trades SET status='BUY_SUBMITTED', buy_order_id=? WHERE trade_id=? AND status='SUBMITTING'", (str(order_id), trade_id))
         send_message(f"📨 BUY LIMIT submitted: {payload['symbol']} × {payload['quantity']} at ₹{payload['entry']:.2f}. Order ID: {order_id}. Stop-loss protection will be placed only for confirmed fills.")
