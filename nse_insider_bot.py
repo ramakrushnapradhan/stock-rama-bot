@@ -132,6 +132,10 @@ def first(row: dict, *keys: str):
 def normalize_rows(payload) -> list[dict]:
     """Unwrap the current NSE PIT Annual response and common nested table envelopes."""
     if isinstance(payload, list):
+        # NSE legitimately returns [] when there are no disclosures in the
+        # requested date range. Treat that as an empty result, not a schema error.
+        if not payload:
+            return []
         rows = [item for item in payload if isinstance(item, dict)]
         if rows:
             return rows
