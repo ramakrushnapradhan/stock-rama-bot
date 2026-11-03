@@ -21,6 +21,8 @@ from zoneinfo import ZoneInfo
 
 import requests
 
+from swing_strategy import analyze_symbol, format_swing_analysis
+
 LOG = logging.getLogger("stock_rama_bot")
 NSE_PAGE_URL = "https://www.nseindia.com/companies-listing/corporate-filings-insider-trading"
 NSE_PIT_API_URL = "https://www.nseindia.com/api/corporates-pit-gg"
@@ -223,7 +225,7 @@ def send_telegram(message: str) -> None:
         raise RuntimeError("Telegram API rejected the message.")
 
 
-def format_alert(symbol: str, company: str, rows: list[dict], total: float) -> str:
+def format_alert(symbol: str, company: str, rows: list[dict], total: float, analysis: dict) -> str:
     lines = [
         "📈 NSE PROMOTER OPEN-MARKET BUY ALERT",
         f"Company: {company}",
@@ -243,6 +245,7 @@ def format_alert(symbol: str, company: str, rows: list[dict], total: float) -> s
         )
     if len(rows) > 8:
         lines.append(f"…and {len(rows) - 8} more qualifying disclosure(s).")
+    lines.extend(format_swing_analysis(analysis))
     lines.extend([
         "",
         f"Source: NSE Regulation 7(2) XBRL disclosures ({NSE_PAGE_URL})",
@@ -320,7 +323,8 @@ def main() -> int:
         total = sum(row["_value"] for row in company_rows)
         if total < MIN_VALUE_INR:
             continue
-        send_telegram(format_alert(symbol, company, company_rows, total))
+        analysis = analyze_symbol(symbol, total, len(company_rows))
+        send_telegram(format_alert(symbol, company, company_rows, total, analysis))
         sent_keys.update(record_key(row) for row in company_rows)
         LOG.info(
             "Sent promoter-buy alert: %s (%s), ₹%.0f across %d rolling-window disclosures "
