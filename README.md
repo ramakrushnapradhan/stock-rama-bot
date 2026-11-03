@@ -73,7 +73,9 @@ In **Settings → Secrets and variables → Actions**:
 |---|---:|---|
 | `MIN_VALUE_INR` | 500000 | Minimum promoter purchase aggregate (₹5 lakh) |
 | `LOOKBACK_DAYS` | 7 | Filing lookback |
-| `TRADING_CAPITAL_INR` | 10000 | Maximum capital allocated per trade (₹10,000 default) |
+| `TRADING_CAPITAL_INR` | 10000 | Total capital used to calculate the 1% risk budget; not the per-trade ceiling |
+| `MIN_TRADE_AMOUNT_INR` | 100 | Minimum proposed order value |
+| `MAX_TRADE_AMOUNT_INR` | 1500 | Hard maximum proposed order value per trade |
 | `RISK_PER_TRADE_PCT` | 1.0 | Planned capital risk per trade |
 | `BACKTEST_COST_BPS` | 30 | Estimated round-trip cost in basis points |
 | `SWING_MAX_HOLD_DAYS` | 20 | Maximum backtest holding sessions |
@@ -84,7 +86,7 @@ GitHub Actions is configured to run Monday–Friday at 9:30 PM India time (16:00
 
 ## Safety
 
-- The bot does not place orders or connect to a broker.
+- The current scanner does not place orders or connect to a broker. A ₹100–₹1,500 sizing guide is not a submitted order.
 - BUY SETUP is a rules-based candidate, not a prediction or guarantee.
 - Check the original NSE disclosure, latest results, corporate actions, liquidity, circuit limits and live bid/ask spread before considering a trade.
 - No trade should exceed the 1% planned capital-risk budget; real gaps can exceed the planned stop.
