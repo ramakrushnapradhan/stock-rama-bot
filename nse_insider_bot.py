@@ -54,7 +54,37 @@ def fetch_json(
         try:
             response = session.get(url, params=params, timeout=25)
             response.raise_for_status()
-            return response.json()
+            content_type = response.headers.get("Content-Type", "unknown")
+            try:
+                payload = response.json()
+            except ValueError as exc:
+                preview = re.sub(r"\\s+", " ", response.text[:500]).strip()
+                LOG.error(
+                    "NSE returned non-JSON response: status=%s content_type=%s "
+                    "url=%s body_preview=%r",
+                    response.status_code, content_type, response.url, preview,
+                )
+                raise ValueError("NSE API returned non-JSON content.") from exc
+
+            if isinstance(payload, dict):
+                shape = {
+                    "type": "object",
+                    "keys": list(payload.keys())[:40],
+                    "value_types": {
+                        str(key): type(value).__name__
+                        for key, value in list(payload.items())[:20]
+                    },
+                }
+            elif isinstance(payload, list):
+                shape = {"type": "array", "length": len(payload),
+                         "first_item_type": type(payload[0]).__name__ if payload else None}
+            else:
+                shape = {"type": type(payload).__name__}
+            LOG.info(
+                "NSE response received: status=%s content_type=%s url=%s shape=%s",
+                response.status_code, content_type, response.url, shape,
+            )
+            return payload
         except (requests.RequestException, ValueError) as exc:
             last_error = exc
             LOG.warning("NSE request attempt %d/3 failed: %s", attempt + 1, exc)
@@ -121,9 +151,15 @@ def normalize_rows(payload) -> list[dict]:
         for value in payload.values():
             if isinstance(value, list) and value and all(isinstance(x, dict) for x in value):
                 return value
+    if isinstance(payload, dict):
+        keys = list(payload.keys())[:40]
+        raise ValueError(
+            "NSE PIT Annual response had no disclosure rows. "
+            f"Top-level keys={keys!r}; inspect the preceding NSE response log."
+        )
     raise ValueError(
-        "NSE PIT Annual response did not contain a disclosure row collection. "
-        "The upstream API may have changed or returned an error page."
+        f"NSE PIT Annual response had unsupported type {type(payload).__name__}; "
+        "inspect the preceding NSE response log."
     )
 
 
