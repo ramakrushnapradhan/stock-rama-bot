@@ -2,9 +2,10 @@ name: Stock Rama NSE Insider Alerts
 
 on:
   schedule:
-    # GitHub Actions cron uses UTC. 03:45–10:15 UTC is approximately
-    # 09:15–15:45 India time, every 10 minutes, Monday through Friday.
-    - cron: "*/10 3-10 * * 1-5"
+    # UTC schedule corresponding to 09:15–15:30 India time, Monday to Friday.
+    - cron: "45,55 3 * * 1-5"
+    - cron: "5,15,25,35,45,55 4-9 * * 1-5"
+    - cron: "0 10 * * 1-5"
   workflow_dispatch:
 
 permissions:
@@ -42,7 +43,7 @@ jobs:
         run: python nse_insider_bot.py
 
       - name: Save alert deduplication state
-        if: always()
+        if: success()
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "chore: update insider alert state"
