@@ -38,7 +38,7 @@ The repository default `TRADING_CAPITAL_INR=0` intentionally disables a rupee sh
 
 ## Backtesting
 
-The bot runs a five-year daily-bar, technical-only walk-forward simulation for each qualifying symbol:
+The bot uses Yahoo Finance daily adjusted OHLCV history through yfinance for its current technical snapshot and runs a five-year daily-bar, technical-only walk-forward simulation for each qualifying symbol:
 - Signal calculated using data available at that day's close; earliest entry is the next session.
 - Entry requires the next session to trade through the breakout trigger without opening above the maximum acceptable entry.
 - Stop and 2R target are evaluated on subsequent daily OHLC bars; if both are touched on one bar, the stop is assumed to occur first.
