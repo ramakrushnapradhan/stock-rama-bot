@@ -295,17 +295,10 @@ def main() -> int:
         if not is_promoter(row):
             continue
         if not is_market_buy(row):
-            # The Annual PIT feed may identify a Buy disclosure without exposing
-            # its execution mode. Do not mislabel off-market/ESOP/other buys as
-            # open-market purchases; only alert when NSE explicitly says Market.
-            mode = first(
-                row, "acqMode", "acqmMode", "modeOfAcquisition",
-                "acquisitionMode", "transactionMode", "mode",
-                "mode_of_acquisition", "marketMode"
-            )
-            if mode:
-                continue
-            LOG.debug("Skipping promoter buy without an explicit market-mode field.")
+            # The Annual PIT feed may identify a BUY without exposing execution
+            # mode. Never treat a missing mode as proof of an open-market trade.
+            LOG.debug("Skipping disclosure without an explicit BUY + Market mode.")
+            continue
         value = transaction_value(row)
         if value >= MIN_VALUE_INR:
             eligible.append(row)
