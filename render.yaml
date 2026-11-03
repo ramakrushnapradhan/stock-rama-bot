@@ -1,0 +1,37 @@
+services:
+  - type: web
+    name: stock-rama-approval
+    runtime: docker
+    plan: starter
+    healthCheckPath: /health
+    disk:
+      name: stock-rama-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: APPROVAL_DB_PATH
+        value: /var/data/stock_rama.sqlite3
+      - key: LIVE_TRADING_ENABLED
+        value: "false"
+      - key: MIN_TRADE_AMOUNT_INR
+        value: "100"
+      - key: MAX_TRADE_AMOUNT_INR
+        value: "1500"
+      - key: APPROVAL_TTL_SECONDS
+        value: "300"
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
+        sync: false
+      - key: AUTHORIZED_TELEGRAM_USER_ID
+        sync: false
+      - key: INTERNAL_API_TOKEN
+        sync: false
+      - key: KITE_API_KEY
+        sync: false
+      - key: KITE_API_SECRET
+        sync: false
+      - key: PUBLIC_BASE_URL
+        sync: false
