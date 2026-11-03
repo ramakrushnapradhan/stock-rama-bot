@@ -58,7 +58,7 @@ def fetch_json(
             try:
                 payload = response.json()
             except ValueError as exc:
-                preview = re.sub(r"\\s+", " ", response.text[:500]).strip()
+                preview = re.sub(r"\s+", " ", response.text[:500]).strip()
                 LOG.error(
                     "NSE returned non-JSON response: status=%s content_type=%s "
                     "url=%s body_preview=%r",
