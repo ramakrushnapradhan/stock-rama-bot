@@ -15,6 +15,7 @@ from swing_strategy import (
 
 class SwingStrategyTests(unittest.TestCase):
     def test_promoter_score_is_bounded_and_rewards_repeated_disclosures(self):
+        self.assertEqual(_promoter_score(0, 0), 0)
         self.assertEqual(_promoter_score(5_000_000, 1), 10)
         self.assertEqual(_promoter_score(100_000_000, 3), 20)
 
