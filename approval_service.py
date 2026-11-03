@@ -217,38 +217,74 @@ def reconcile_fills():
         history = kite.order_history(str(row["buy_order_id"]))
         latest = history[-1] if history else buy
         filled = int(latest.get("filled_quantity") or 0)
-        if filled > int(row["stop_covered_qty"]):
-            delta = filled - int(row["stop_covered_qty"])
-            payload = json.loads(row["payload"])
-            trigger = round_down_tick(float(payload["stop"]))
-            limit_price = round_down_tick(trigger * 0.995)
-            sl_tag = ("SRS" + row["trade_id"].replace("-", "")[:9])[:20]
-            # Recover from a crash after placing an SL but before updating SQLite.
-            existing = [o for o in orders if o.get("tag") == sl_tag and o.get("transaction_type") == "SELL"]
-            already = sum(int(o.get("quantity") or 0) for o in existing)
-            if already < filled:
-                kite.place_order(
-                    variety=kite.VARIETY_REGULAR,
-                    exchange=kite.EXCHANGE_NSE,
-                    tradingsymbol=payload["symbol"],
-                    transaction_type=kite.TRANSACTION_TYPE_SELL,
-                    quantity=filled - already,
-                    product=kite.PRODUCT_CNC,
-                    order_type=kite.ORDER_TYPE_SL,
-                    price=limit_price,
-                    trigger_price=trigger,
-                    validity=kite.VALIDITY_DAY,
-                    tag=sl_tag,
-                )
-            with db() as conn:
-                conn.execute(
-                    "UPDATE trades SET stop_covered_qty=?, filled_qty=?, status=? WHERE trade_id=?",
-                    (filled, filled, "PROTECTED" if latest.get("status") == "COMPLETE" else "PARTIALLY_PROTECTED", row["trade_id"])
-                )
-            send_message(f"🛡 Stop-loss order placed for {payload['symbol']}: {filled} filled share(s), trigger ₹{trigger:.2f}.")
-        elif latest.get("status") in ("REJECTED", "CANCELLED") and filled == 0:
+        if latest.get("status") in ("REJECTED", "CANCELLED") and filled == 0:
             with db() as conn:
                 conn.execute("UPDATE trades SET status=? WHERE trade_id=?", (latest.get("status"), row["trade_id"]))
+            continue
+
+        payload = json.loads(row["payload"])
+        trigger = round_down_tick(float(payload["stop"]))
+        limit_price = round_down_tick(trigger * 0.995)
+        sl_tag = ("SRS" + row["trade_id"].replace("-", "")[:9])[:20]
+        stop_orders = [
+            o for o in orders
+            if o.get("tag") == sl_tag and o.get("transaction_type") == "SELL"
+        ]
+        failed_stop = next((o for o in stop_orders if o.get("status") in ("REJECTED", "CANCELLED")), None)
+        if failed_stop:
+            with db() as conn:
+                conn.execute(
+                    "UPDATE trades SET status='PROTECTION_ERROR', last_error=? WHERE trade_id=?",
+                    (f"Stop order {failed_stop.get('order_id')} is {failed_stop.get('status')}", row["trade_id"])
+                )
+            send_message(
+                f"🚨 STOP-LOSS PROTECTION NEEDS YOUR ATTENTION: {payload['symbol']}. "
+                f"Stop order {failed_stop.get('order_id')} is {failed_stop.get('status')}. "
+                "Check your Zerodha order book and net position immediately."
+            )
+            continue
+
+        sold_qty = sum(int(o.get("filled_quantity") or 0) for o in stop_orders)
+        remaining_position = max(0, filled - sold_qty)
+        active_statuses = {"OPEN", "TRIGGER PENDING", "AMO REQ RECEIVED", "VALIDATION PENDING"}
+        active_stop_qty = sum(
+            max(0, int(o.get("quantity") or 0) - int(o.get("filled_quantity") or 0))
+            for o in stop_orders if o.get("status") in active_statuses
+        )
+        if remaining_position == 0 and filled > 0:
+            with db() as conn:
+                conn.execute(
+                    "UPDATE trades SET status='STOPPED_OUT', filled_qty=? WHERE trade_id=?",
+                    (filled, row["trade_id"])
+                )
+            continue
+
+        missing_protection = max(0, remaining_position - active_stop_qty)
+        if missing_protection > 0:
+            # Deterministic tag lets the next cycle recover if broker accepted the
+            # stop order but this process lost the HTTP response.
+            kite.place_order(
+                variety=kite.VARIETY_REGULAR,
+                exchange=kite.EXCHANGE_NSE,
+                tradingsymbol=payload["symbol"],
+                transaction_type=kite.TRANSACTION_TYPE_SELL,
+                quantity=missing_protection,
+                product=kite.PRODUCT_CNC,
+                order_type=kite.ORDER_TYPE_SL,
+                price=limit_price,
+                trigger_price=trigger,
+                validity=kite.VALIDITY_DAY,
+                tag=sl_tag,
+            )
+            send_message(
+                f"🛡 Stop-loss SELL order submitted for {payload['symbol']}: "
+                f"{missing_protection} share(s), trigger ₹{trigger:.2f}."
+            )
+        with db() as conn:
+            conn.execute(
+                "UPDATE trades SET stop_covered_qty=?, filled_qty=?, status=? WHERE trade_id=?",
+                (filled, filled, "PROTECTED" if active_stop_qty + missing_protection >= remaining_position else "PROTECTION_ERROR", row["trade_id"])
+            )
 
 
 def worker_loop():
