@@ -34,7 +34,9 @@ AUTHORIZED_USER = os.getenv("AUTHORIZED_TELEGRAM_USER_ID", "")
 KITE_API_KEY = os.getenv("KITE_API_KEY", "")
 KITE_API_SECRET = os.getenv("KITE_API_SECRET", "")
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
-LIVE_TRADING = os.getenv("LIVE_TRADING_ENABLED", "false").lower() == "true"
+# Fail-closed: this legacy Render service must not place Kite API orders.
+# Zerodha API orders require a whitelisted static IP; do not enable trading here.
+LIVE_TRADING = False
 MIN_AMOUNT = float(os.getenv("MIN_TRADE_AMOUNT_INR", "100"))
 MAX_AMOUNT = float(os.getenv("MAX_TRADE_AMOUNT_INR", "1500"))
 APPROVAL_TTL_SECONDS = 300
