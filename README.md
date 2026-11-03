@@ -34,8 +34,8 @@ Decision rules:
 The entry is a breakout trigger just above the signal day's high. The bot also gives a maximum acceptable entry (0.5 ATR above the trigger); it says not to chase an opening gap beyond that level. The initial stop is normally 1.8 ATR below entry, with a nearby 10-session swing-low adjustment when it falls inside the allowed stop band. Target 1 is 2R and Target 2 is 3R. The plan assumes a maximum holding period of 20 trading sessions.
 
 Position sizing uses at most 1% of configured trading capital as planned loss:
-`shares = floor((capital × 1%) / (entry − stop))`
-The workflow currently uses a ₹10,000 per-trade allocation ceiling for position sizing. Shares are limited by both the 1% risk budget (₹100 per trade) and that per-trade ceiling. Change `TRADING_CAPITAL_INR` to ₹5,000 if that is the amount you want to allocate. The 1% is a risk budget, not a guarantee; gaps can cause larger losses.
+`shares = min(floor((capital × 1%) / (entry − stop)), floor(min(capital, ₹1,500) / entry))`
+The hard per-trade allocation range is ₹100–₹1,500. The ₹1,500 ceiling applies even when `TRADING_CAPITAL_INR` is higher. If no whole-share quantity satisfies the minimum, maximum and risk budget together, the scanner does not propose a position. The 1% is a risk budget, not a guarantee; gaps can cause larger losses.
 
 ## Independent market scanner
 
@@ -65,7 +65,7 @@ In **Settings → Secrets and variables → Actions**:
 
 ### Repository variables
 - `TELEGRAM_CHAT_ID`: destination Telegram chat ID.
-- `TRADING_CAPITAL_INR`: the workflow default is ₹10,000 per candidate trade. Set it to ₹5,000 if that is your preferred allocation. Each alert assumes that amount is available for that one candidate; the bot does not track your broker holdings or reserve cash across multiple simultaneous alerts.
+- `TRADING_CAPITAL_INR`: total capital used to calculate the 1% risk budget. This is separate from the hard ₹1,500 per-trade ceiling.
 
 ### Strategy environment defaults
 
