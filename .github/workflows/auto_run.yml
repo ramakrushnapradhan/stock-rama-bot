@@ -16,7 +16,7 @@ concurrency:
 jobs:
   run-insider-alerts:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -37,14 +37,25 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ vars.TELEGRAM_CHAT_ID }}
-          MIN_VALUE_INR: "5000000"
+          MIN_VALUE_INR: "500000"
           LOOKBACK_DAYS: "7"
-          TRADING_CAPITAL_INR: "0"
+          TRADING_CAPITAL_INR: "10000"
           RISK_PER_TRADE_PCT: "1.0"
           BACKTEST_COST_BPS: "30"
           SWING_MAX_HOLD_DAYS: "20"
           STATE_FILE: alerted_transactions.json
         run: python nse_insider_bot.py
+
+      - name: Scan NIFTY 500 for independent swing setups
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ vars.TELEGRAM_CHAT_ID }}
+          TRADING_CAPITAL_INR: "10000"
+          RISK_PER_TRADE_PCT: "1.0"
+          BACKTEST_COST_BPS: "30"
+          SWING_MAX_HOLD_DAYS: "20"
+          SCAN_TOP_N: "5"
+        run: python market_scanner.py
 
       - name: Save alert deduplication state
         if: success()
