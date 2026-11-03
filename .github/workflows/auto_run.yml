@@ -1,11 +1,8 @@
 name: Stock Rama NSE Insider Alerts
 
+# Automatic scheduling is paused until the current NSE PIT Annual feed can be
+# parsed without inventing market-mode or symbol information.
 on:
-  schedule:
-    # UTC schedule corresponding to 09:15–15:30 India time, Monday to Friday.
-    - cron: "45,55 3 * * 1-5"
-    - cron: "5,15,25,35,45,55 4-9 * * 1-5"
-    - cron: "0 10 * * 1-5"
   workflow_dispatch:
 
 permissions:
