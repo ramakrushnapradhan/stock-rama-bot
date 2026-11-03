@@ -4,6 +4,9 @@ name: Stock Rama NSE Insider Alerts
 # parsed without inventing market-mode or symbol information.
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
 
 permissions:
   contents: write
