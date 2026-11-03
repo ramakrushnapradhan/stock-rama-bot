@@ -37,6 +37,8 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ vars.TELEGRAM_CHAT_ID }}
+          APPROVAL_SERVICE_URL: ${{ vars.APPROVAL_SERVICE_URL }}
+          INTERNAL_API_TOKEN: ${{ secrets.INTERNAL_API_TOKEN }}
           MIN_VALUE_INR: "500000"
           LOOKBACK_DAYS: "7"
           TRADING_CAPITAL_INR: "10000"
@@ -52,6 +54,8 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ vars.TELEGRAM_CHAT_ID }}
+          APPROVAL_SERVICE_URL: ${{ vars.APPROVAL_SERVICE_URL }}
+          INTERNAL_API_TOKEN: ${{ secrets.INTERNAL_API_TOKEN }}
           TRADING_CAPITAL_INR: "10000"
           MIN_TRADE_AMOUNT_INR: "100"
           MAX_TRADE_AMOUNT_INR: "1500"
