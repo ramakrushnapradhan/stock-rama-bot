@@ -56,45 +56,17 @@ The bot uses Yahoo Finance daily adjusted OHLCV history through yfinance for its
 
 A strategy should only be considered for paper trading after it has enough trades, positive after-cost expectancy, tolerable drawdown, and robust results across different market periods and nearby parameter settings. Backtests must avoid look-ahead bias and include realistic execution costs; see [backtesting validation guidance](https://learn.aivistacapital.com/learning-center/strategies-systems/research-and-testing/) and [NSE historical reports](https://www.nseindia.com/static/resources/historical-reports-capital-market-daily-monthly-archives).
 
-## Telegram approval and Zerodha integration
+## Telegram approval and execution status
 
-The scanner can send eligible BUY SETUP proposals to a separate FastAPI service. The service presents **Approve BUY** and **Reject** buttons in Telegram, accepts callbacks only from the configured Telegram numeric user ID, and expires approvals after five minutes. Rejecting or allowing a proposal to expire never places an order.
+Eligible BUY SETUP proposals can be sent from the GitHub Actions scanners to a Cloudflare Worker. The Worker validates the request, creates a five-minute Telegram approval card, authorizes only the configured numeric Telegram user ID, and records Approve/Reject decisions in Cloudflare D1.
 
-The approval service is provided as `approval_service.py`, `Dockerfile`, and `render.yaml`. It must run continuously on a public HTTPS host with a persistent disk; GitHub Actions is not a suitable webhook server. For a Render deployment:
+**Important:** The Cloudflare Worker is currently restricted to approval and notification only. It does not place Zerodha orders. Zerodha requires a whitelisted static IP for API order placement from 1 April 2026; a standard Cloudflare Worker or GitHub-hosted runner does not provide a dedicated fixed outbound IP. Do not enable live execution or add Kite credentials to this Worker.
 
-1. Create a new Blueprint deployment from this repository using `render.yaml`; attach the persistent disk.
-2. Configure the environment variables listed below in the service dashboard. Keep all secrets private.
-3. Set `PUBLIC_BASE_URL` to the deployed HTTPS service URL.
-4. In the Zerodha Kite developer console, set the app redirect URL to `<PUBLIC_BASE_URL>/kite/callback`.
-5. Create a Telegram bot with `@BotFather`, start a private chat with it, and set the bot token, chat ID and your own numeric Telegram user ID.
-6. Call `POST <PUBLIC_BASE_URL>/admin/set-webhook` with header `Authorization: Bearer <INTERNAL_API_TOKEN>` once the service is live.
-7. Visit `<PUBLIC_BASE_URL>/kite/login` and complete Zerodha login. Kite access tokens are session-based; repeat login when the daily token expires.
-8. Keep `LIVE_TRADING_ENABLED=false` until the complete approval and order lifecycle has been tested in a safe environment. It must be deliberately changed to `true` in the hosting dashboard before Telegram approval can submit a real order.
+A separate executor running from a whitelisted static IP must be implemented and tested before Telegram approvals can place real broker orders. Until then, place trades manually in Zerodha Kite after reviewing the alert. Zerodha does not offer a Kite Connect sandbox; API orders can be real orders.
 
-### Approval-service environment variables
+See the [beginner setup guide](cloudflare/BEGINNER_SETUP.md) for exact Cloudflare, GitHub, and Telegram steps. The guide includes a test workflow that sends a clearly marked TESTONLY approval card and never sends a broker order.
 
-- `TELEGRAM_BOT_TOKEN`: Telegram bot token.
-- `TELEGRAM_CHAT_ID`: private chat destination for alerts and approval buttons.
-- `AUTHORIZED_TELEGRAM_USER_ID`: your numeric Telegram account ID; only this ID can approve/reject.
-- `TELEGRAM_WEBHOOK_SECRET`: random 32+ character secret used to authenticate Telegram webhook requests.
-- `INTERNAL_API_TOKEN`: long random bearer token shared with GitHub Actions.
-- `KITE_API_KEY` and `KITE_API_SECRET`: Zerodha Kite app credentials; never put them in source code or chat.
-- `PUBLIC_BASE_URL`: public HTTPS URL of the approval service.
-- `LIVE_TRADING_ENABLED`: defaults to `false`; leave disabled until you have tested everything.
-- `APPROVAL_DB_PATH`: persistent SQLite path; Render blueprint uses `/var/data/stock_rama.sqlite3`.
-
-### GitHub Actions secrets and variables
-
-Repository secrets:
-- `TELEGRAM_BOT_TOKEN`
-- `INTERNAL_API_TOKEN` (must match the approval service)
-
-Repository variables:
-- `TELEGRAM_CHAT_ID`
-- `APPROVAL_SERVICE_URL` (the approval service HTTPS base URL)
-- `TRADING_CAPITAL_INR`: total capital used to calculate the existing 1% risk budget. This is separate from the hard ₹1,500 per-trade ceiling.
-
-### Strategy environment defaults
+## Strategy environment defaults
 
 | Variable | Default | Meaning |
 |---|---:|---|
