@@ -139,7 +139,7 @@ def main() -> int:
                 "📊 STOCK RAMA — INDEPENDENT SWING SCAN",
                 f"Universe: NIFTY 500 | Technical rank score: {score}/80",
                 "Promoter disclosure is not required for this scan.",
-                "The ₹10,000 sizing assumes this is the only position; do not allocate ₹10,000 to every alert if your total budget is ₹10,000.",
+                "Any position guide is limited to ₹1,500 per trade and the configured 1% risk budget.",
                 "",
                 *format_swing_analysis(result),
             ]
