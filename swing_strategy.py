@@ -121,6 +121,8 @@ def _technical_score(row: pd.Series, market_state: str) -> int:
 
 
 def _promoter_score(value_inr: float, transaction_count: int) -> int:
+    if value_inr <= 0 or transaction_count <= 0:
+        return 0
     if value_inr >= 100_000_000:
         score = 18
     elif value_inr >= 50_000_000:
@@ -302,7 +304,9 @@ def analyze_symbol(
 
         capital = TRADING_CAPITAL
         risk_budget = capital * RISK_PER_TRADE if capital > 0 else None
-        shares = int(risk_budget / levels["risk_per_share"]) if risk_budget else None
+        risk_limited_shares = int(risk_budget / levels["risk_per_share"]) if risk_budget else 0
+        capital_limited_shares = int(capital / levels["entry"]) if capital > 0 else 0
+        shares = min(risk_limited_shares, capital_limited_shares) if capital > 0 else None
         position_value = shares * levels["entry"] if shares else None
         result.update({
             "action": action, "score": total, "technical_score": tech,
