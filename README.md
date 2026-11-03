@@ -2,7 +2,7 @@
 
 A GitHub Actions Telegram alert bot for NSE insider-trading disclosures.
 
-> **Important — source-data change:** NSE currently displays a separate **Insider Trading (PIT) – Annual** feed. The older detailed API used by the first version of this bot contains fields such as symbol and acquisition mode, but a July 2026 community data-maintainer report says that detailed feed stopped receiving updates after 2 May 2026. The current Annual feed is coarser and does not provide the same symbol/mode detail. Therefore the automatic schedule is intentionally **paused**: do not rely on this repository for current trade alerts until the data-source adapter is updated and tested. See the current [NSE PIT Annual page](https://www.nseindia.com/companies-listing/corporate-filings-pit-annual).
+> **Source-data limitation:** The bot now targets NSE's **Insider Trading (PIT) – Annual** feed. NSE's May 4, 2026 circular moved new Regulation 7(2)/(7(3)) filings to an XBRL-based process; previously filed disclosures remain in the archive. The Annual feed's displayed columns do not always expose execution mode or a ticker symbol. The bot therefore fails closed: it skips promoter BUY rows unless the response explicitly identifies a Market acquisition mode. It must not describe an unverified BUY as an open-market purchase. See the [NSE PIT Annual page](https://www.nseindia.com/companies-listing/corporate-filings-pit-annual) and [NSE circular](https://www.nseindia.com/companies-listing/corporate-filings-insider-trading-archive-data).
 
 ## Configuration
 
@@ -18,9 +18,9 @@ The Telegram token previously pasted into chat should be revoked with **@BotFath
 
 ## Running
 
-The GitHub Actions workflow currently supports **manual dispatch only**. Automatic 10-minute scheduling is disabled until the new NSE Annual PIT format can be parsed and its limitations are handled correctly.
+The GitHub Actions workflow currently supports **manual dispatch only**. Automatic 10-minute scheduling remains disabled until the new endpoint and response schema have been verified with a successful live run.
 
-Do not manually run the legacy script expecting fresh post-May-2026 disclosures; it uses the old detailed `/api/corporates-pit` feed.
+The script now requests `/api/corporate-IT-PIT-Annual`. It accepts common NSE response envelopes and field-name variants, but only sends an open-market alert when the source explicitly provides a Market acquisition mode. Rows without that field are skipped rather than guessed.
 
 ## Intended alert criteria
 
@@ -31,7 +31,7 @@ The original requirements were:
 - rolling seven-day lookback;
 - one Telegram alert per new disclosure/company group.
 
-The old detailed NSE schema exposed fields including `personCategory`, `tdpTransactionType`, `acqMode`, `symbol`, `secAcq`, and `secVal`. The current PIT Annual presentation has a different, coarser structure; the exact open-market filter and symbol mapping cannot safely be assumed from the old schema.
+The Annual PIT schema is not guaranteed to expose the old detailed fields. If a disclosure has no explicit execution-mode field, it is not eligible for the strict open-market alert. If a ticker is absent, the alert uses the company name and does not invent a symbol.
 
 ## Duplicate-alert state
 
@@ -39,4 +39,4 @@ The old detailed NSE schema exposed fields including `personCategory`, `tdpTrans
 
 ## Next compatibility step
 
-Update the source adapter to read the current PIT Annual feed and explicitly label what it can and cannot determine. In particular, if market mode is not supplied, the bot must not describe a disclosure as an open-market purchase. If symbol mapping is unavailable, alerts should identify the company name instead of guessing a ticker.
+After the first successful live run, inspect the returned NSE field names and add only verified aliases. Do not enable the 10-minute schedule until a sample disclosure has been checked against the NSE filing page and the alert filter is confirmed.
