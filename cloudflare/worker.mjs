@@ -55,6 +55,10 @@ export function validateProposal(input, minAmount = 100, maxAmount = 1500) {
   };
 }
 
+export function approvalStatusForAction(action) {
+  return action === "reject" ? "REJECTED" : "APPROVED_PENDING_STATIC_IP_EXECUTOR";
+}
+
 export function tickSizeForPrice(price) {
   // NSE cash-market price-linked slabs. The exchange reviews the applicable
   // slab monthly; proposals still need broker/exchange validation at placement.
@@ -222,7 +226,7 @@ async function handleTelegramWebhook(request, env) {
 
   const now = Math.floor(Date.now() / 1000);
   const updateId = String(update.update_id ?? callback.id);
-  const newStatus = action === "reject" ? "REJECTED" : "APPROVED_PENDING_STATIC_IP_EXECUTOR";
+  const newStatus = approvalStatusForAction(action);
 
   // D1 batch is transactional. Duplicate Telegram update IDs and already-handled
   // trade IDs cannot win this conditional state transition twice.
