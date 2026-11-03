@@ -20,6 +20,8 @@ HOLDING_DAYS = int(os.getenv("SWING_MAX_HOLD_DAYS", "20"))
 RISK_PER_TRADE = float(os.getenv("RISK_PER_TRADE_PCT", "1.0")) / 100.0
 ROUND_TRIP_COST_BPS = float(os.getenv("BACKTEST_COST_BPS", "30"))
 TRADING_CAPITAL = float(os.getenv("TRADING_CAPITAL_INR", "0"))
+MIN_TRADE_AMOUNT_INR = float(os.getenv("MIN_TRADE_AMOUNT_INR", "100"))
+MAX_TRADE_AMOUNT_INR = float(os.getenv("MAX_TRADE_AMOUNT_INR", "1500"))
 MIN_BACKTEST_TRADES = 30
 
 
@@ -304,10 +306,15 @@ def analyze_symbol(
 
         capital = TRADING_CAPITAL
         risk_budget = capital * RISK_PER_TRADE if capital > 0 else None
+        # Hard per-order cap is independent of total account capital.
+        allocation_cap = min(capital, MAX_TRADE_AMOUNT_INR) if capital > 0 else 0
         risk_limited_shares = int(risk_budget / levels["risk_per_share"]) if risk_budget else 0
-        capital_limited_shares = int(capital / levels["entry"]) if capital > 0 else 0
-        shares = min(risk_limited_shares, capital_limited_shares) if capital > 0 else None
+        allocation_limited_shares = int(allocation_cap / levels["entry"]) if allocation_cap > 0 else 0
+        shares = min(risk_limited_shares, allocation_limited_shares) if allocation_cap > 0 else None
         position_value = shares * levels["entry"] if shares else None
+        if position_value is not None and position_value < MIN_TRADE_AMOUNT_INR:
+            shares = None
+            position_value = None
         result.update({
             "action": action, "score": total, "technical_score": tech,
             "promoter_score": promoter, "market": state, "close": float(row["Close"]),
@@ -341,10 +348,13 @@ def format_swing_analysis(result: dict[str, Any]) -> list[str]:
     if result.get("shares"):
         lines.append(
             f"Position guide: {result['shares']} shares (~₹{result['position_value']:,.0f}); "
-            f"risk budget ₹{result['risk_budget']:,.0f}"
+            f"risk budget ₹{result['risk_budget']:,.0f}; hard per-trade cap ₹{MAX_TRADE_AMOUNT_INR:,.0f}"
         )
     else:
-        lines.append("Position sizing: risk at most 1% of your capital; shares = (capital × 1%) ÷ risk/share.")
+        lines.append(
+            f"Position sizing: no valid quantity within ₹{MIN_TRADE_AMOUNT_INR:,.0f}–₹{MAX_TRADE_AMOUNT_INR:,.0f} "
+            "and the configured 1% risk budget; no order should be proposed."
+        )
     lines.append(f"Reason: {result['reason']}")
 
     bt = result.get("backtest") or {}
