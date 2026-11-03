@@ -1,0 +1,97 @@
+name: Deploy Stock Rama approval Worker
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_D1_DATABASE_ID: ${{ vars.CLOUDFLARE_D1_DATABASE_ID }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ vars.TELEGRAM_CHAT_ID }}
+      TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
+      AUTHORIZED_TELEGRAM_USER_ID: ${{ vars.AUTHORIZED_TELEGRAM_USER_ID }}
+      INTERNAL_API_TOKEN: ${{ secrets.INTERNAL_API_TOKEN }}
+      KITE_API_KEY: ${{ secrets.KITE_API_KEY }}
+      KITE_API_SECRET: ${{ secrets.KITE_API_SECRET }}
+      KITE_TOKEN_ENCRYPTION_KEY: ${{ secrets.KITE_TOKEN_ENCRYPTION_KEY }}
+      APPROVAL_SERVICE_URL: ${{ vars.APPROVAL_SERVICE_URL }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Validate deployment configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_D1_DATABASE_ID TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID TELEGRAM_WEBHOOK_SECRET AUTHORIZED_TELEGRAM_USER_ID INTERNAL_API_TOKEN; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Missing GitHub secret/variable: $name"
+              exit 1
+            fi
+          done
+          if ! [[ "$AUTHORIZED_TELEGRAM_USER_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::AUTHORIZED_TELEGRAM_USER_ID must be your numeric Telegram user ID"
+            exit 1
+          fi
+
+      - name: Prepare Wrangler configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          sed -i "s/__CLOUDFLARE_ACCOUNT_ID__/$CLOUDFLARE_ACCOUNT_ID/g" cloudflare/wrangler.toml
+          sed -i "s/__CLOUDFLARE_D1_DATABASE_ID__/$CLOUDFLARE_D1_DATABASE_ID/g" cloudflare/wrangler.toml
+          if grep -q "__CLOUDFLARE_" cloudflare/wrangler.toml; then
+            echo "::error::Cloudflare account or D1 database ID was not substituted"
+            exit 1
+          fi
+
+      - name: Apply D1 migrations
+        run: npx --yes wrangler@4.102.0 d1 migrations apply stock-rama-db --remote --config cloudflare/wrangler.toml
+
+      - name: Deploy Worker with safe mode defaults
+        run: npx --yes wrangler@4.102.0 deploy --config cloudflare/wrangler.toml
+
+      - name: Upload encrypted Worker secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require("node:fs");
+          const names = [
+            "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "TELEGRAM_WEBHOOK_SECRET",
+            "AUTHORIZED_TELEGRAM_USER_ID", "INTERNAL_API_TOKEN",
+            "KITE_API_KEY", "KITE_API_SECRET", "KITE_TOKEN_ENCRYPTION_KEY"
+          ];
+          const secrets = {};
+          for (const name of names) {
+            const value = process.env[name];
+            if (value) secrets[name] = value;
+          }
+          fs.writeFileSync("/tmp/stock-rama-worker-secrets.json", JSON.stringify(secrets), { mode: 0o600 });
+          NODE
+          npx --yes wrangler@4.102.0 secret bulk /tmp/stock-rama-worker-secrets.json --config cloudflare/wrangler.toml
+          rm -f /tmp/stock-rama-worker-secrets.json
+
+      - name: Configure Telegram webhook
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$APPROVAL_SERVICE_URL" ]; then
+            echo "::notice::Worker deployed. Add GitHub variable APPROVAL_SERVICE_URL using the Worker workers.dev URL, then rerun this workflow to configure Telegram."
+            exit 0
+          fi
+          curl --fail --silent --show-error -X POST "$APPROVAL_SERVICE_URL/admin/set-webhook" \
+            -H "Authorization: Bearer $INTERNAL_API_TOKEN"
