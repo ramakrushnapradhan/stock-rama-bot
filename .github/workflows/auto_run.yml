@@ -1,8 +1,9 @@
 name: Stock Rama NSE Insider Alerts
 
-# Automatic scheduling is paused until the current NSE PIT Annual feed can be
-# parsed without inventing market-mode or symbol information.
 on:
+  # Run once each NSE trading weekday at 9:30 PM India time (16:00 UTC).
+  schedule:
+    - cron: "0 16 * * 1-5"
   workflow_dispatch:
   push:
     branches:
@@ -18,7 +19,7 @@ concurrency:
 jobs:
   run-insider-alerts:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -32,11 +33,10 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run NSE insider trading monitor
+      - name: Run daily NSE insider trading monitor
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ vars.TELEGRAM_CHAT_ID }}
-          NSE_PIT_API_URL: ${{ vars.NSE_PIT_API_URL }}
           MIN_VALUE_INR: "5000000"
           LOOKBACK_DAYS: "7"
           STATE_FILE: alerted_transactions.json
