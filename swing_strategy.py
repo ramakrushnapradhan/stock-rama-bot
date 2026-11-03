@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+from functools import lru_cache
 from typing import Any
 
 import pandas as pd
@@ -22,6 +23,7 @@ TRADING_CAPITAL = float(os.getenv("TRADING_CAPITAL_INR", "0"))
 MIN_BACKTEST_TRADES = 30
 
 
+@lru_cache(maxsize=32)
 def _history(ticker: str, period: str = "5y") -> pd.DataFrame:
     frame = yf.Ticker(ticker).history(
         period=period, interval="1d", auto_adjust=True, actions=False, timeout=25
@@ -193,8 +195,8 @@ def _backtest(data: pd.DataFrame, market: pd.Series) -> dict[str, Any]:
             bar = data.iloc[j]
             hit_stop = bar["Low"] <= stop
             hit_target = bar["High"] >= target
-            if hit_stop:  # pessimistic if both stop and target occur in one daily bar
-                exit_price = stop
+            if hit_stop:  # pessimistic if both levels touch in one bar; respect stop gaps
+                exit_price = min(float(bar["Open"]), stop)
                 actual_exit_index = j
                 break
             if hit_target:
@@ -273,15 +275,27 @@ def analyze_symbol(
         promoter = _promoter_score(promoter_value_inr, transaction_count)
         total = min(100, tech + promoter)
 
+        backtest = _backtest(data, market)
         if state == "BEAR":
             action = "AVOID"
             reason = "NIFTY 50 market regime is bearish; moderate-risk entries are blocked."
         elif total >= 75 and tech >= 55 and levels["risk_reward"] >= 2:
-            action = "BUY SETUP"
-            reason = "Trend, momentum, volume, promoter catalyst and planned 2R reward/risk meet the rules."
+            backtest_pass = (
+                backtest.get("sample_ok")
+                and backtest.get("expectancy_r") is not None
+                and backtest["expectancy_r"] > 0
+                and backtest.get("profit_factor", 0) >= 1.1
+                and backtest.get("max_drawdown_pct", 100) <= 25
+            )
+            if backtest_pass:
+                action = "BUY SETUP"
+                reason = "Current setup passes the score rules and the 5y technical backtest validation gates."
+            else:
+                action = "WAIT"
+                reason = "Current setup scores well, but the 5y technical backtest lacks a sufficiently strong validated edge (30+ trades, positive expectancy, profit factor ≥1.1 and drawdown ≤25%)."
         elif total >= 60:
             action = "WAIT"
-            reason = "Some positive factors exist, but the full entry conditions are not met."
+            reason = "Some positive factors exist, but the full entry and validation conditions are not met."
         else:
             action = "AVOID"
             reason = "The combined technical and promoter score is below the minimum threshold."
@@ -295,7 +309,7 @@ def analyze_symbol(
             "promoter_score": promoter, "market": state, "close": float(row["Close"]),
             **levels, "reason": reason, "risk_budget": risk_budget,
             "shares": shares, "position_value": position_value,
-            "backtest": _backtest(data, market),
+            "backtest": backtest,
         })
         return result
     except Exception as exc:
