@@ -19,10 +19,10 @@ import requests
 
 LOG = logging.getLogger("stock_rama_bot")
 NSE_PAGE_URL = "https://www.nseindia.com/companies-listing/corporate-filings-insider-trading"
-NSE_API_URL = os.getenv(
-    "NSE_PIT_API_URL",
-    "https://www.nseindia.com/api/corporates-pit",
-).strip()
+NSE_API_URL = (
+    os.getenv("NSE_PIT_API_URL", "").strip()
+    or "https://www.nseindia.com/api/corporates-pit"
+)
 STATE_FILE = Path(os.getenv("STATE_FILE", "alerted_transactions.json"))
 MIN_VALUE_INR = float(os.getenv("MIN_VALUE_INR", "5000000"))  # ₹50 lakh
 LOOKBACK_DAYS = int(os.getenv("LOOKBACK_DAYS", "7"))
