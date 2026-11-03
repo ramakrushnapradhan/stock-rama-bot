@@ -233,7 +233,7 @@ def format_alert(symbol: str, company: str, rows: list[dict], total: float) -> s
         "Source: NSE PIT disclosures. Verify the original filing before acting.",
         "Informational only — not investment advice.",
     ])
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 def main() -> int:
