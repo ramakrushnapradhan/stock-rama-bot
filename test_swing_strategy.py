@@ -30,7 +30,7 @@ class SwingStrategyTests(unittest.TestCase):
             (None, None, 100.0),
         )
         self.assertEqual(
-            _position_size(entry=200, risk_per_share=100, capital=10_000),
+            _position_size(entry=50, risk_per_share=200, capital=10_000),
             (None, None, 100.0),
         )
 
