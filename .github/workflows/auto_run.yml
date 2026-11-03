@@ -40,6 +40,8 @@ jobs:
           MIN_VALUE_INR: "500000"
           LOOKBACK_DAYS: "7"
           TRADING_CAPITAL_INR: "10000"
+          MIN_TRADE_AMOUNT_INR: "100"
+          MAX_TRADE_AMOUNT_INR: "1500"
           RISK_PER_TRADE_PCT: "1.0"
           BACKTEST_COST_BPS: "30"
           SWING_MAX_HOLD_DAYS: "20"
@@ -51,6 +53,8 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ vars.TELEGRAM_CHAT_ID }}
           TRADING_CAPITAL_INR: "10000"
+          MIN_TRADE_AMOUNT_INR: "100"
+          MAX_TRADE_AMOUNT_INR: "1500"
           RISK_PER_TRADE_PCT: "1.0"
           BACKTEST_COST_BPS: "30"
           SWING_MAX_HOLD_DAYS: "20"
