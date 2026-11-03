@@ -15,6 +15,7 @@ import requests
 import yfinance as yf
 
 from nse_insider_bot import send_telegram
+from trade_proposals import submit_trade_proposal
 from swing_strategy import (
     _indicators,
     _market_states,
@@ -135,6 +136,7 @@ def main() -> int:
 
         for score, symbol in selected:
             result = analyze_symbol(symbol, 0, 0)
+            approval = submit_trade_proposal(symbol, result, "NIFTY 500 swing scan")
             message = [
                 "📊 STOCK RAMA — INDEPENDENT SWING SCAN",
                 f"Universe: NIFTY 500 | Technical rank score: {score}/80",
