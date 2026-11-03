@@ -1,0 +1,41 @@
+name: Send Stock Rama Telegram approval test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  send-test-proposal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      APPROVAL_SERVICE_URL: ${{ vars.APPROVAL_SERVICE_URL }}
+      INTERNAL_API_TOKEN: ${{ secrets.INTERNAL_API_TOKEN }}
+    steps:
+      - name: Validate configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$APPROVAL_SERVICE_URL" || { echo "::error::Add APPROVAL_SERVICE_URL under repository Actions Variables first."; exit 1; }
+          test -n "$INTERNAL_API_TOKEN" || { echo "::error::Add INTERNAL_API_TOKEN under repository Actions Secrets first."; exit 1; }
+
+      - name: Send a test-only Telegram approval card
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            -X POST "$APPROVAL_SERVICE_URL/proposals" \
+            -H "Authorization: Bearer $INTERNAL_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "symbol": "TESTONLY",
+              "quantity": 1,
+              "entry": 100,
+              "stop": 95,
+              "target": 110,
+              "amount": 100,
+              "source": "GitHub manual test — no live trade"
+            }'
+          echo
