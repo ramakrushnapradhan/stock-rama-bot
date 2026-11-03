@@ -35,7 +35,7 @@ The entry is a breakout trigger just above the signal day's high. The bot also g
 
 Position sizing uses at most 1% of configured trading capital as planned loss:
 `shares = floor((capital × 1%) / (entry − stop))`
-The workflow currently uses a ₹10,000 total capital ceiling for position sizing. Shares are limited by both the 1% risk budget (₹100 per trade) and the total capital ceiling. Change `TRADING_CAPITAL_INR` to ₹5,000 if that is the amount you want to allocate. The 1% is a risk budget, not a guarantee; gaps can cause larger losses.
+The workflow currently uses a ₹10,000 per-trade allocation ceiling for position sizing. Shares are limited by both the 1% risk budget (₹100 per trade) and that per-trade ceiling. Change `TRADING_CAPITAL_INR` to ₹5,000 if that is the amount you want to allocate. The 1% is a risk budget, not a guarantee; gaps can cause larger losses.
 
 ## Independent market scanner
 
@@ -65,7 +65,7 @@ In **Settings → Secrets and variables → Actions**:
 
 ### Repository variables
 - `TELEGRAM_CHAT_ID`: destination Telegram chat ID.
-- Optional `TRADING_CAPITAL_INR`: capital amount for 1% risk-based share sizing. Default 0 disables the share-count suggestion.
+- `TRADING_CAPITAL_INR`: the workflow default is ₹10,000 per candidate trade. Set it to ₹5,000 if that is your preferred allocation. Each alert assumes that amount is available for that one candidate; the bot does not track your broker holdings or reserve cash across multiple simultaneous alerts.
 
 ### Strategy environment defaults
 
