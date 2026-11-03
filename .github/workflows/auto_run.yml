@@ -36,6 +36,10 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ vars.TELEGRAM_CHAT_ID }}
           MIN_VALUE_INR: "5000000"
           LOOKBACK_DAYS: "7"
+          TRADING_CAPITAL_INR: "0"
+          RISK_PER_TRADE_PCT: "1.0"
+          BACKTEST_COST_BPS: "30"
+          SWING_MAX_HOLD_DAYS: "20"
           STATE_FILE: alerted_transactions.json
         run: python nse_insider_bot.py
 
