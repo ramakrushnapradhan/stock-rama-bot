@@ -1,13 +1,10 @@
 name: Stock Rama NSE Insider Alerts
 
 on:
-  # Run once each NSE trading weekday at 9:30 PM India time (16:00 UTC).
+  # Once each NSE trading weekday at 9:30 PM India time (16:00 UTC).
   schedule:
     - cron: "0 16 * * 1-5"
   workflow_dispatch:
-  push:
-    branches:
-      - main
 
 permissions:
   contents: write
