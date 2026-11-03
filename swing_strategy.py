@@ -20,6 +20,8 @@ HOLDING_DAYS = int(os.getenv("SWING_MAX_HOLD_DAYS", "20"))
 RISK_PER_TRADE = float(os.getenv("RISK_PER_TRADE_PCT", "1.0")) / 100.0
 ROUND_TRIP_COST_BPS = float(os.getenv("BACKTEST_COST_BPS", "30"))
 TRADING_CAPITAL = float(os.getenv("TRADING_CAPITAL_INR", "0"))
+MIN_TRADE_AMOUNT_INR = float(os.getenv("MIN_TRADE_AMOUNT_INR", "100"))
+MAX_TRADE_AMOUNT_INR = float(os.getenv("MAX_TRADE_AMOUNT_INR", "1500"))
 MIN_BACKTEST_TRADES = 30
 
 
@@ -158,6 +160,28 @@ def _trade_levels(row: pd.Series) -> dict[str, float]:
         "risk_reward": 2.0,
         "atr": atr,
     }
+
+
+def _position_size(
+    entry: float,
+    risk_per_share: float,
+    capital: float,
+    risk_fraction: float = RISK_PER_TRADE,
+    min_amount: float = MIN_TRADE_AMOUNT_INR,
+    max_amount: float = MAX_TRADE_AMOUNT_INR,
+) -> tuple[int | None, float | None, float | None]:
+    """Calculate whole-share sizing within both the risk budget and hard order-value bounds."""
+    if entry <= 0 or risk_per_share <= 0 or capital <= 0:
+        return None, None, None
+    risk_budget = capital * risk_fraction
+    allocation_cap = min(capital, max_amount)
+    risk_limited_shares = int(risk_budget / risk_per_share)
+    allocation_limited_shares = int(allocation_cap / entry)
+    shares = min(risk_limited_shares, allocation_limited_shares)
+    position_value = shares * entry
+    if shares <= 0 or position_value < min_amount or position_value > max_amount:
+        return None, None, risk_budget
+    return shares, position_value, risk_budget
 
 
 def _backtest(data: pd.DataFrame, market: pd.Series) -> dict[str, Any]:
@@ -302,12 +326,11 @@ def analyze_symbol(
             action = "AVOID"
             reason = "The combined technical and promoter score is below the minimum threshold."
 
-        capital = TRADING_CAPITAL
-        risk_budget = capital * RISK_PER_TRADE if capital > 0 else None
-        risk_limited_shares = int(risk_budget / levels["risk_per_share"]) if risk_budget else 0
-        capital_limited_shares = int(capital / levels["entry"]) if capital > 0 else 0
-        shares = min(risk_limited_shares, capital_limited_shares) if capital > 0 else None
-        position_value = shares * levels["entry"] if shares else None
+        shares, position_value, risk_budget = _position_size(
+            entry=levels["entry"],
+            risk_per_share=levels["risk_per_share"],
+            capital=TRADING_CAPITAL,
+        )
         result.update({
             "action": action, "score": total, "technical_score": tech,
             "promoter_score": promoter, "market": state, "close": float(row["Close"]),
@@ -341,10 +364,13 @@ def format_swing_analysis(result: dict[str, Any]) -> list[str]:
     if result.get("shares"):
         lines.append(
             f"Position guide: {result['shares']} shares (~₹{result['position_value']:,.0f}); "
-            f"risk budget ₹{result['risk_budget']:,.0f}"
+            f"risk budget ₹{result['risk_budget']:,.0f}; hard per-trade cap ₹{MAX_TRADE_AMOUNT_INR:,.0f}"
         )
     else:
-        lines.append("Position sizing: risk at most 1% of your capital; shares = (capital × 1%) ÷ risk/share.")
+        lines.append(
+            f"Position sizing: no valid quantity within ₹{MIN_TRADE_AMOUNT_INR:,.0f}–₹{MAX_TRADE_AMOUNT_INR:,.0f} "
+            "and the configured 1% risk budget; no order should be proposed."
+        )
     lines.append(f"Reason: {result['reason']}")
 
     bt = result.get("backtest") or {}

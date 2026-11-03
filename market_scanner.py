@@ -15,6 +15,7 @@ import requests
 import yfinance as yf
 
 from nse_insider_bot import send_telegram
+from trade_proposals import submit_trade_proposal
 from swing_strategy import (
     _indicators,
     _market_states,
@@ -135,14 +136,20 @@ def main() -> int:
 
         for score, symbol in selected:
             result = analyze_symbol(symbol, 0, 0)
+            approval = submit_trade_proposal(symbol, result, "NIFTY 500 swing scan")
             message = [
                 "📊 STOCK RAMA — INDEPENDENT SWING SCAN",
                 f"Universe: NIFTY 500 | Technical rank score: {score}/80",
                 "Promoter disclosure is not required for this scan.",
-                "The ₹10,000 sizing assumes this is the only position; do not allocate ₹10,000 to every alert if your total budget is ₹10,000.",
+                "Any position guide is limited to ₹1,500 per trade and the configured 1% risk budget.",
                 "",
                 *format_swing_analysis(result),
             ]
+            if approval:
+                message.append(
+                    f"\\n📲 Sent to Telegram for approval; expires in "
+                    f"{approval.get('expires_in_seconds', 300)} seconds."
+                )
             send_telegram("\n".join(message))
         return 0
     except Exception:

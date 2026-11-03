@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 from swing_strategy import analyze_symbol, format_swing_analysis
+from trade_proposals import submit_trade_proposal
 
 LOG = logging.getLogger("stock_rama_bot")
 NSE_PAGE_URL = "https://www.nseindia.com/companies-listing/corporate-filings-insider-trading"
@@ -324,7 +325,11 @@ def main() -> int:
         if total < MIN_VALUE_INR:
             continue
         analysis = analyze_symbol(symbol, total, len(company_rows))
-        send_telegram(format_alert(symbol, company, company_rows, total, analysis))
+        approval = submit_trade_proposal(symbol, analysis, "NSE promoter open-market buy disclosure")
+        alert = format_alert(symbol, company, company_rows, total, analysis)
+        if approval:
+            alert += f"\\n\\n📲 Sent to Telegram for your approval (expires in {approval.get('expires_in_seconds', 300)} seconds)."
+        send_telegram(alert)
         sent_keys.update(record_key(row) for row in company_rows)
         LOG.info(
             "Sent promoter-buy alert: %s (%s), ₹%.0f across %d rolling-window disclosures "

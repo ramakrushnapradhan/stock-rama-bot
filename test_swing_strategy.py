@@ -8,12 +8,32 @@ from swing_strategy import (
     _indicators,
     _market_states,
     _promoter_score,
+    _position_size,
     _technical_score,
     _trade_levels,
 )
 
 
 class SwingStrategyTests(unittest.TestCase):
+    def test_position_size_never_exceeds_1500(self):
+        shares, value, risk_budget = _position_size(
+            entry=200, risk_per_share=5, capital=10_000
+        )
+        self.assertEqual(shares, 7)
+        self.assertEqual(value, 1_400)
+        self.assertLessEqual(value, 1_500)
+        self.assertEqual(risk_budget, 100)
+
+    def test_position_size_rejects_below_minimum_and_single_share_over_cap(self):
+        self.assertEqual(
+            _position_size(entry=2_000, risk_per_share=100, capital=10_000),
+            (None, None, 100.0),
+        )
+        self.assertEqual(
+            _position_size(entry=50, risk_per_share=200, capital=10_000),
+            (None, None, 100.0),
+        )
+
     def test_promoter_score_is_bounded_and_rewards_repeated_disclosures(self):
         self.assertEqual(_promoter_score(0, 0), 0)
         self.assertEqual(_promoter_score(5_000_000, 1), 10)

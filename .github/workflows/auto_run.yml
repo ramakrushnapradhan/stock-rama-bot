@@ -5,6 +5,8 @@ on:
   schedule:
     - cron: "0 16 * * 1-5"
   workflow_dispatch:
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: write
@@ -14,7 +16,25 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  test:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run unit tests
+        run: python -m unittest -v test_swing_strategy.py test_approval_service.py
+
   run-insider-alerts:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -37,9 +57,13 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ vars.TELEGRAM_CHAT_ID }}
+          APPROVAL_SERVICE_URL: ${{ vars.APPROVAL_SERVICE_URL }}
+          INTERNAL_API_TOKEN: ${{ secrets.INTERNAL_API_TOKEN }}
           MIN_VALUE_INR: "500000"
           LOOKBACK_DAYS: "7"
           TRADING_CAPITAL_INR: "10000"
+          MIN_TRADE_AMOUNT_INR: "100"
+          MAX_TRADE_AMOUNT_INR: "1500"
           RISK_PER_TRADE_PCT: "1.0"
           BACKTEST_COST_BPS: "30"
           SWING_MAX_HOLD_DAYS: "20"
@@ -50,7 +74,11 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ vars.TELEGRAM_CHAT_ID }}
+          APPROVAL_SERVICE_URL: ${{ vars.APPROVAL_SERVICE_URL }}
+          INTERNAL_API_TOKEN: ${{ secrets.INTERNAL_API_TOKEN }}
           TRADING_CAPITAL_INR: "10000"
+          MIN_TRADE_AMOUNT_INR: "100"
+          MAX_TRADE_AMOUNT_INR: "1500"
           RISK_PER_TRADE_PCT: "1.0"
           BACKTEST_COST_BPS: "30"
           SWING_MAX_HOLD_DAYS: "20"
