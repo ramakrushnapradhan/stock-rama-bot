@@ -305,21 +305,27 @@ def main() -> int:
     already_alerted = load_state()
     grouped: dict[tuple[str, str], list[dict]] = {}
     for row in eligible:
-        key = record_key(row)
-        if key in already_alerted:
-            continue
         symbol = str(row.get("_symbol") or row.get("Symbol") or "UNKNOWN").strip()
         company = str(row.get("NameOfTheCompany") or symbol).strip()
         grouped.setdefault((symbol, company), []).append(row)
 
     sent_keys: set[str] = set()
     for (symbol, company), company_rows in grouped.items():
+        # Calculate the threshold across the full rolling window, including
+        # disclosures already seen on previous days. Alert only when this
+        # company has at least one newly published filing in the current run.
+        new_rows = [row for row in company_rows if record_key(row) not in already_alerted]
+        if not new_rows:
+            continue
         total = sum(row["_value"] for row in company_rows)
         if total < MIN_VALUE_INR:
             continue
         send_telegram(format_alert(symbol, company, company_rows, total))
         sent_keys.update(record_key(row) for row in company_rows)
-        LOG.info("Sent promoter-buy alert: %s (%s), ₹%.0f across %d disclosures", company, symbol, total, len(company_rows))
+        LOG.info(
+            "Sent promoter-buy alert: %s (%s), ₹%.0f across %d rolling-window disclosures "
+            "(%d new)", company, symbol, total, len(company_rows), len(new_rows)
+        )
 
     if sent_keys:
         save_state(already_alerted | sent_keys)
