@@ -18,10 +18,10 @@ from zoneinfo import ZoneInfo
 import requests
 
 LOG = logging.getLogger("stock_rama_bot")
-NSE_PAGE_URL = "https://www.nseindia.com/companies-listing/corporate-filings-insider-trading"
+NSE_PAGE_URL = "https://www.nseindia.com/companies-listing/corporate-filings-pit-annual"
 NSE_API_URL = (
     os.getenv("NSE_PIT_API_URL", "").strip()
-    or "https://www.nseindia.com/api/corporates-pit"
+    or "https://www.nseindia.com/api/corporate-IT-PIT-Annual"
 )
 STATE_FILE = Path(os.getenv("STATE_FILE", "alerted_transactions.json"))
 MIN_VALUE_INR = float(os.getenv("MIN_VALUE_INR", "5000000"))  # ₹50 lakh
@@ -100,30 +100,38 @@ def first(row: dict, *keys: str):
 
 
 def normalize_rows(payload) -> list[dict]:
-    """Unwrap common NSE JSON response shapes without silently accepting unknown data."""
+    """Unwrap the current NSE PIT Annual response and common nested table envelopes."""
     if isinstance(payload, list):
         rows = [item for item in payload if isinstance(item, dict)]
         if rows:
             return rows
     if isinstance(payload, dict):
-        for key in ("data", "records", "results", "tableData", "dataList"):
-            if key in payload:
+        # Current NSE responses have used several envelope names. Search only
+        # structured collections; never treat arbitrary metadata as disclosures.
+        for key in (
+            "data", "records", "results", "tableData", "dataList",
+            "corporateITPITAnnual", "pitAnnual", "rows", "aaData",
+        ):
+            value = payload.get(key)
+            if isinstance(value, (dict, list)):
                 try:
-                    return normalize_rows(payload[key])
+                    return normalize_rows(value)
                 except ValueError:
-                    pass
+                    continue
         for value in payload.values():
-            if isinstance(value, list) and value and isinstance(value[0], dict):
+            if isinstance(value, list) and value and all(isinstance(x, dict) for x in value):
                 return value
     raise ValueError(
-        "Unrecognized NSE PIT response shape. Check the NSE API response/schema."
+        "NSE PIT Annual response did not contain a disclosure row collection. "
+        "The upstream API may have changed or returned an error page."
     )
 
 
 def is_promoter(row: dict) -> bool:
     category = str(first(
         row, "personCategory", "categoryOfPerson", "category",
-        "acquirerCategory", "promoterCategory"
+        "acquirerCategory", "promoterCategory", "person_category",
+        "category_of_person", "categoryOfPersonName"
     ) or "").lower()
     return "promoter" in category
 
@@ -131,10 +139,12 @@ def is_promoter(row: dict) -> bool:
 def is_market_buy(row: dict) -> bool:
     mode = str(first(
         row, "acqMode", "acqmMode", "modeOfAcquisition",
-        "acquisitionMode", "transactionMode"
+        "acquisitionMode", "transactionMode", "mode",
+        "mode_of_acquisition", "marketMode"
     ) or "").lower()
     transaction_type = str(first(
-        row, "tdpTransactionType", "transactionType", "buySell"
+        row, "tdpTransactionType", "transactionType", "buySell",
+        "transaction_type", "typeOfTransaction", "transaction"
     ) or "").lower()
     is_buy = any(word in transaction_type for word in ("buy", "purchase", "acquisition"))
     is_market = "market" in mode
@@ -143,13 +153,15 @@ def is_market_buy(row: dict) -> bool:
 
 def transaction_value(row: dict) -> float:
     direct = first(
-        row, "secVal", "securitiesValue", "transactionValue", "totalValue", "value"
+        row, "secVal", "securitiesValue", "transactionValue", "totalValue", "value",
+        "valueOfSecurities", "value_of_securities", "buyValue", "buy_value"
     )
     value = to_number(direct)
     if value > 0:
         return value
     quantity = to_number(first(
-        row, "secAcq", "securitiesAcquired", "quantity", "noOfShares", "shares"
+        row, "secAcq", "securitiesAcquired", "quantity", "noOfShares", "shares",
+        "noOfSharesAcquired", "no_of_shares", "buyQuantity", "buy_quantity"
     ))
     price = to_number(first(
         row, "secPrice", "price", "avgPrice", "acquisitionPrice"
@@ -162,7 +174,7 @@ def record_key(row: dict) -> str:
     parts = [
         identifier,
         first(row, "symbol", "scSymbol"),
-        first(row, "acqName", "personName", "acquirerName"),
+        first(row, "acqName", "personName", "acquirerName", "nameOfPerson", "person_name"),
         first(row, "acqtoDt", "acqDt", "dateOfAcquisition", "transactionDate", "date"),
         first(row, "secAcq", "quantity", "noOfShares"),
         first(row, "secVal", "transactionValue", "value"),
@@ -211,7 +223,7 @@ def send_telegram(message: str) -> None:
 
 def format_alert(symbol: str, company: str, rows: list[dict], total: float) -> str:
     lines = [
-        "📈 NSE PROMOTER BUY ALERT",
+        "📈 NSE PROMOTER OPEN-MARKET BUY ALERT",
         f"Company: {company}",
         f"Symbol: {symbol}",
         f"Aggregate disclosed value: ₹{total:,.0f}",
@@ -220,7 +232,8 @@ def format_alert(symbol: str, company: str, rows: list[dict], total: float) -> s
     ]
     for row in rows[:8]:
         name = first(row, "acqName", "personName", "acquirerName") or "Promoter"
-        date = first(row, "acqtoDt", "acqfromDt", "acqDt", "dateOfAcquisition", "date") or "Not listed"
+        date = first(row, "acqtoDt", "acqfromDt", "acqDt", "dateOfAcquisition", "date",
+        "transactionDate", "transaction_to", "transaction_from") or "Not listed"
         quantity = first(row, "secAcq", "securitiesAcquired", "quantity", "noOfShares")
         lines.append(
             f"• {name} | {date} | Qty: {quantity or 'N/A'} | "
@@ -273,20 +286,34 @@ def main() -> int:
     for row in rows:
         date_value = first(
             row, "acqtoDt", "acqfromDt", "acqDt",
-            "dateOfAcquisition", "transactionDate", "date", "intimDt"
+            "dateOfAcquisition", "transactionDate", "date", "intimDt",
+            "transaction_to", "transaction_from", "dateOfTransaction"
         )
         parsed = parse_date(date_value)
         if parsed and not (start_date <= parsed.date() <= end_date):
             continue
-        if not is_promoter(row) or not is_market_buy(row):
+        if not is_promoter(row):
             continue
+        if not is_market_buy(row):
+            # The Annual PIT feed may identify a Buy disclosure without exposing
+            # its execution mode. Do not mislabel off-market/ESOP/other buys as
+            # open-market purchases; only alert when NSE explicitly says Market.
+            mode = first(
+                row, "acqMode", "acqmMode", "modeOfAcquisition",
+                "acquisitionMode", "transactionMode", "mode",
+                "mode_of_acquisition", "marketMode"
+            )
+            if mode:
+                continue
+            LOG.debug("Skipping promoter buy without an explicit market-mode field.")
         value = transaction_value(row)
         if value >= MIN_VALUE_INR:
             eligible.append(row)
 
     if not eligible:
         LOG.info(
-            "No promoter open-market buy disclosures ≥ ₹%.0f found in the lookback window.",
+            "No confirmed promoter open-market buy disclosures ≥ ₹%.0f found. "
+            "Rows without an explicit Market acquisition mode are intentionally skipped.",
             MIN_VALUE_INR,
         )
         return 0
@@ -296,8 +323,8 @@ def main() -> int:
     for row in eligible:
         if record_key(row) in already_alerted:
             continue
-        symbol = str(first(row, "symbol", "scSymbol", "companySymbol") or "UNKNOWN").strip()
-        company = str(first(row, "company", "companyName", "nameOfCompany") or symbol).strip()
+        symbol = str(first(row, "symbol", "scSymbol", "companySymbol", "ticker") or "UNKNOWN").strip()
+        company = str(first(row, "company", "companyName", "nameOfCompany", "company_name", "issuerName") or symbol).strip()
         grouped.setdefault((symbol, company), []).append(row)
 
     sent_keys: set[str] = set()
