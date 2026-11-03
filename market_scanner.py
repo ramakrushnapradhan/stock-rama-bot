@@ -145,6 +145,11 @@ def main() -> int:
                 "",
                 *format_swing_analysis(result),
             ]
+            if approval:
+                message.append(
+                    f"\\n📲 Sent to Telegram for approval; expires in "
+                    f"{approval.get('expires_in_seconds', 300)} seconds."
+                )
             send_telegram("\n".join(message))
         return 0
     except Exception:
