@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""Monitor NSE PIT disclosures and send qualifying promoter open-market buy alerts.
+"""Daily NSE PIT Regulation 7(2) XBRL promoter-buy monitor.
 
-Informational only, not investment advice. NSE may change its website/API at any time.
+Reads the current NSE insider-trading filing list, downloads each XBRL instance,
+filters promoter/promoter-group market purchases, and sends Telegram alerts.
+Informational only; verify the original NSE filing before acting.
 """
 from __future__ import annotations
 
@@ -11,20 +13,20 @@ import os
 import re
 import sys
 import time
+import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import urljoin
 from zoneinfo import ZoneInfo
 
 import requests
 
 LOG = logging.getLogger("stock_rama_bot")
-NSE_PAGE_URL = "https://www.nseindia.com/companies-listing/corporate-filings-pit-annual"
-NSE_API_URL = (
-    os.getenv("NSE_PIT_API_URL", "").strip()
-    or "https://www.nseindia.com/api/corporate-IT-PIT-Annual"
-)
+NSE_PAGE_URL = "https://www.nseindia.com/companies-listing/corporate-filings-insider-trading"
+NSE_PIT_API_URL = "https://www.nseindia.com/api/corporates-pit-gg"
+NSE_BASE_URL = "https://www.nseindia.com"
 STATE_FILE = Path(os.getenv("STATE_FILE", "alerted_transactions.json"))
-MIN_VALUE_INR = float(os.getenv("MIN_VALUE_INR", "5000000"))  # ₹50 lakh
+MIN_VALUE_INR = float(os.getenv("MIN_VALUE_INR", "5000000"))
 LOOKBACK_DAYS = int(os.getenv("LOOKBACK_DAYS", "7"))
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
@@ -36,84 +38,107 @@ def make_session() -> requests.Session:
     session.headers.update({
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
         ),
         "Accept": "application/json, text/plain, */*",
         "Accept-Language": "en-US,en;q=0.9",
         "Referer": NSE_PAGE_URL,
         "Connection": "keep-alive",
     })
+    # NSE issues cookies from the public filings page before serving API data.
+    response = session.get(NSE_PAGE_URL, timeout=30)
+    response.raise_for_status()
     return session
 
 
-def fetch_json(
-    session: requests.Session, url: str, *, params: dict | None = None
-):
-    last_error: Exception | None = None
+def fetch_filing_list(session: requests.Session, start_date, end_date) -> list[dict]:
+    params = {
+        "index": "equities",
+        "from_date": start_date.strftime("%d-%m-%Y"),
+        "to_date": end_date.strftime("%d-%m-%Y"),
+    }
+    last_error = None
     for attempt in range(3):
         try:
-            response = session.get(url, params=params, timeout=25)
+            response = session.get(NSE_PIT_API_URL, params=params, timeout=35)
             response.raise_for_status()
-            content_type = response.headers.get("Content-Type", "unknown")
-            try:
-                payload = response.json()
-            except ValueError as exc:
-                preview = re.sub(r"\s+", " ", response.text[:500]).strip()
-                LOG.error(
-                    "NSE returned non-JSON response: status=%s content_type=%s "
-                    "url=%s body_preview=%r",
-                    response.status_code, content_type, response.url, preview,
-                )
-                raise ValueError("NSE API returned non-JSON content.") from exc
-
+            payload = response.json()
             if isinstance(payload, dict):
-                shape = {
-                    "type": "object",
-                    "keys": list(payload.keys())[:40],
-                    "value_types": {
-                        str(key): type(value).__name__
-                        for key, value in list(payload.items())[:20]
-                    },
-                }
+                rows = payload.get("data")
+                if not isinstance(rows, list):
+                    raise ValueError(
+                        "NSE PIT filing-list response did not contain a data array; "
+                        f"keys={list(payload)[:30]!r}"
+                    )
             elif isinstance(payload, list):
-                shape = {"type": "array", "length": len(payload),
-                         "first_item_type": type(payload[0]).__name__ if payload else None}
+                rows = payload
             else:
-                shape = {"type": type(payload).__name__}
+                raise ValueError(f"Unexpected NSE filing-list type: {type(payload).__name__}")
+            if rows and not all(isinstance(row, dict) for row in rows):
+                raise ValueError("NSE filing-list data contained non-object entries.")
             LOG.info(
-                "NSE response received: status=%s content_type=%s url=%s shape=%s",
-                response.status_code, content_type, response.url, shape,
+                "NSE PIT filing list: status=%s url=%s rows=%d fields=%s",
+                response.status_code, response.url, len(rows),
+                list(rows[0].keys())[:30] if rows else [],
             )
-            return payload
+            if rows and not any(row.get("xmlFileName") for row in rows):
+                raise ValueError("NSE filing rows did not contain xmlFileName; refusing to treat as no disclosures.")
+            return rows
         except (requests.RequestException, ValueError) as exc:
             last_error = exc
-            LOG.warning("NSE request attempt %d/3 failed: %s", attempt + 1, exc)
+            LOG.warning("NSE filing-list attempt %d/3 failed: %s", attempt + 1, exc)
             if attempt < 2:
                 time.sleep(2 ** attempt)
-    raise RuntimeError(f"Could not fetch NSE PIT data: {last_error}") from last_error
+    raise RuntimeError(f"Could not retrieve current NSE PIT filing list: {last_error}") from last_error
 
 
-def parse_date(value) -> datetime | None:
-    if not value:
-        return None
-    text = str(value).strip()
-    for fmt in ("%d-%b-%Y", "%d-%b-%y", "%d-%m-%Y", "%d/%m/%Y", "%Y-%m-%d"):
-        try:
-            return datetime.strptime(text[:10] if fmt == "%Y-%m-%d" else text[:11], fmt)
-        except ValueError:
-            continue
+def fetch_xbrl(session: requests.Session, file_reference: str) -> str:
+    url = urljoin(NSE_BASE_URL, file_reference)
+    response = session.get(url, timeout=30)
+    response.raise_for_status()
+    if not response.content:
+        raise ValueError(f"NSE returned an empty XBRL document: {url}")
+    return response.content.decode("utf-8-sig", errors="replace")
+
+
+def local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1].split(":")[-1]
+
+
+def parse_xbrl_facts(xml_text: str) -> list[dict]:
+    """Expand XBRL facts into one row per disclosure context, inheriting MainI facts."""
     try:
-        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-        return parsed.replace(tzinfo=None) if parsed.tzinfo else parsed
-    except ValueError:
-        return None
+        root = ET.fromstring(xml_text)
+    except ET.ParseError as exc:
+        raise ValueError(f"Could not parse NSE XBRL instance: {exc}") from exc
+
+    facts_by_context: dict[str, dict] = {}
+    for element in root.iter():
+        context = element.attrib.get("contextRef")
+        if not context or len(element):
+            continue
+        name = local_name(element.tag)
+        value = (element.text or "").strip()
+        if value:
+            facts_by_context.setdefault(context, {})[name] = value
+
+    main = facts_by_context.get("MainI", {})
+    rows = []
+    for context, facts in facts_by_context.items():
+        if context == "MainI":
+            continue
+        row = {**main, **facts, "_context": context}
+        if any(key in row for key in (
+            "NameOfThePerson", "CategoryOfPerson",
+            "SecuritiesAcquiredOrDisposedNumberOfSecurity",
+        )):
+            rows.append(row)
+    return rows
 
 
 def to_number(value) -> float:
     if value is None:
         return 0.0
-    if isinstance(value, (int, float)):
-        return float(value)
     text = re.sub(r"[^0-9.-]", "", str(value).replace(",", ""))
     try:
         return float(text) if text else 0.0
@@ -129,97 +154,42 @@ def first(row: dict, *keys: str):
     return None
 
 
-def normalize_rows(payload) -> list[dict]:
-    """Unwrap the current NSE PIT Annual response and common nested table envelopes."""
-    if isinstance(payload, list):
-        # NSE legitimately returns [] when there are no disclosures in the
-        # requested date range. Treat that as an empty result, not a schema error.
-        if not payload:
-            return []
-        rows = [item for item in payload if isinstance(item, dict)]
-        if rows:
-            return rows
-    if isinstance(payload, dict):
-        # Current NSE responses have used several envelope names. Search only
-        # structured collections; never treat arbitrary metadata as disclosures.
-        for key in (
-            "data", "records", "results", "tableData", "dataList",
-            "corporateITPITAnnual", "pitAnnual", "rows", "aaData",
-        ):
-            value = payload.get(key)
-            if isinstance(value, (dict, list)):
-                try:
-                    return normalize_rows(value)
-                except ValueError:
-                    continue
-        for value in payload.values():
-            if isinstance(value, list) and value and all(isinstance(x, dict) for x in value):
-                return value
-    if isinstance(payload, dict):
-        keys = list(payload.keys())[:40]
-        raise ValueError(
-            "NSE PIT Annual response had no disclosure rows. "
-            f"Top-level keys={keys!r}; inspect the preceding NSE response log."
-        )
-    raise ValueError(
-        f"NSE PIT Annual response had unsupported type {type(payload).__name__}; "
-        "inspect the preceding NSE response log."
-    )
+def normalized(value) -> str:
+    return re.sub(r"[^a-z]", "", str(value or "").lower())
 
 
 def is_promoter(row: dict) -> bool:
-    category = str(first(
-        row, "personCategory", "categoryOfPerson", "category",
-        "acquirerCategory", "promoterCategory", "person_category",
-        "category_of_person", "categoryOfPersonName"
-    ) or "").lower()
+    category = str(first(row, "CategoryOfPerson") or "").lower()
     return "promoter" in category
 
 
 def is_market_buy(row: dict) -> bool:
-    mode = str(first(
-        row, "acqMode", "acqmMode", "modeOfAcquisition",
-        "acquisitionMode", "transactionMode", "mode",
-        "mode_of_acquisition", "marketMode"
-    ) or "").lower()
-    transaction_type = str(first(
-        row, "tdpTransactionType", "transactionType", "buySell",
-        "transaction_type", "typeOfTransaction", "transaction"
-    ) or "").lower()
-    is_buy = any(word in transaction_type for word in ("buy", "purchase", "acquisition"))
-    is_market = "market" in mode
-    return is_buy and is_market
+    transaction_type = normalized(first(row, "SecuritiesAcquiredOrDisposedTransactionType"))
+    mode = normalized(first(row, "ModeOfAcquisitionOrDisposal"))
+    return transaction_type in {"buy", "purchase", "acquisition"} and mode in {
+        "marketpurchase", "marketbuy", "purchasefrommarket"
+    }
 
 
 def transaction_value(row: dict) -> float:
-    direct = first(
-        row, "secVal", "securitiesValue", "transactionValue", "totalValue", "value",
-        "valueOfSecurities", "value_of_securities", "buyValue", "buy_value"
-    )
-    value = to_number(direct)
-    if value > 0:
-        return value
-    quantity = to_number(first(
-        row, "secAcq", "securitiesAcquired", "quantity", "noOfShares", "shares",
-        "noOfSharesAcquired", "no_of_shares", "buyQuantity", "buy_quantity"
-    ))
-    price = to_number(first(
-        row, "secPrice", "price", "avgPrice", "acquisitionPrice"
-    ))
-    return quantity * price
+    return to_number(first(row, "SecuritiesAcquiredOrDisposedValueOfSecurity"))
+
+
+def transaction_quantity(row: dict) -> float:
+    return to_number(first(row, "SecuritiesAcquiredOrDisposedNumberOfSecurity"))
 
 
 def record_key(row: dict) -> str:
-    identifier = first(row, "seqNumber", "id", "transactionId", "acqId", "filingNo")
-    parts = [
-        identifier,
-        first(row, "symbol", "scSymbol"),
-        first(row, "acqName", "personName", "acquirerName", "nameOfPerson", "person_name"),
-        first(row, "acqtoDt", "acqDt", "dateOfAcquisition", "transactionDate", "date"),
-        first(row, "secAcq", "quantity", "noOfShares"),
-        first(row, "secVal", "transactionValue", "value"),
-    ]
-    return "|".join(str(value or "") for value in parts)
+    return "|".join(str(value or "") for value in (
+        row.get("_filing_id"),
+        row.get("_context"),
+        row.get("Symbol") or row.get("_symbol"),
+        row.get("NameOfThePerson"),
+        row.get("DateOfAllotmentAdviceOrAcquisitionOfSharesOrSaleOfSharesSpecifyFromDate"),
+        row.get("DateOfAllotmentAdviceOrAcquisitionOfSharesOrSaleOfSharesSpecifyToDate"),
+        row.get("SecuritiesAcquiredOrDisposedNumberOfSecurity"),
+        row.get("SecuritiesAcquiredOrDisposedValueOfSecurity"),
+    ))
 
 
 def load_state() -> set[str]:
@@ -241,23 +211,15 @@ def send_telegram(message: str) -> None:
     if not TELEGRAM_TOKEN:
         raise RuntimeError("Missing TELEGRAM_BOT_TOKEN GitHub Actions secret.")
     if not TELEGRAM_CHAT_ID:
-        raise RuntimeError(
-            "Missing TELEGRAM_CHAT_ID repository variable. Set it to the destination "
-            "user/group/channel ID, not the bot's own username."
-        )
+        raise RuntimeError("Missing TELEGRAM_CHAT_ID GitHub Actions variable.")
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     response = requests.post(
         url,
-        json={
-            "chat_id": TELEGRAM_CHAT_ID,
-            "text": message,
-            "disable_web_page_preview": True,
-        },
+        json={"chat_id": TELEGRAM_CHAT_ID, "text": message, "disable_web_page_preview": True},
         timeout=20,
     )
     response.raise_for_status()
-    result = response.json()
-    if not result.get("ok"):
+    if not response.json().get("ok"):
         raise RuntimeError("Telegram API rejected the message.")
 
 
@@ -271,20 +233,20 @@ def format_alert(symbol: str, company: str, rows: list[dict], total: float) -> s
         "",
     ]
     for row in rows[:8]:
-        name = first(row, "acqName", "personName", "acquirerName") or "Promoter"
-        date = first(row, "acqtoDt", "acqfromDt", "acqDt", "dateOfAcquisition", "date",
-        "transactionDate", "transaction_to", "transaction_from") or "Not listed"
-        quantity = first(row, "secAcq", "securitiesAcquired", "quantity", "noOfShares")
+        person = first(row, "NameOfThePerson") or "Promoter"
+        date_from = first(row, "DateOfAllotmentAdviceOrAcquisitionOfSharesOrSaleOfSharesSpecifyFromDate")
+        date_to = first(row, "DateOfAllotmentAdviceOrAcquisitionOfSharesOrSaleOfSharesSpecifyToDate")
+        date = date_from or date_to or "Not listed"
         lines.append(
-            f"• {name} | {date} | Qty: {quantity or 'N/A'} | "
+            f"• {person} | {date} | Qty: {transaction_quantity(row):,.0f} | "
             f"₹{transaction_value(row):,.0f}"
         )
     if len(rows) > 8:
         lines.append(f"…and {len(rows) - 8} more qualifying disclosure(s).")
     lines.extend([
         "",
-        "Source: NSE PIT disclosures. Verify the original filing before acting.",
-        "Informational only — not investment advice.",
+        f"Source: NSE Regulation 7(2) XBRL disclosures ({NSE_PAGE_URL})",
+        "Verify the original filing before acting. Informational only — not investment advice.",
     ])
     return "\n".join(lines)
 
@@ -294,85 +256,75 @@ def main() -> int:
         level=os.getenv("LOG_LEVEL", "INFO"),
         format="%(asctime)s %(levelname)s %(message)s",
     )
-    if not TELEGRAM_TOKEN:
-        LOG.error("Missing TELEGRAM_BOT_TOKEN secret.")
-        return 2
-    if not TELEGRAM_CHAT_ID:
-        LOG.error("Missing TELEGRAM_CHAT_ID repository variable.")
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        LOG.error("Missing Telegram configuration: TELEGRAM_BOT_TOKEN secret and TELEGRAM_CHAT_ID variable are required.")
         return 2
 
-    # NSE expects browser-like headers and a cookie warm-up before its JSON API call.
-    session = make_session()
+    today = datetime.now(INDIA_TZ).date()
+    start_date = today - timedelta(days=LOOKBACK_DAYS)
     try:
-        landing = session.get(NSE_PAGE_URL, timeout=20)
-        landing.raise_for_status()
-        today = datetime.now(INDIA_TZ).date()
-        from_date = today - timedelta(days=LOOKBACK_DAYS)
-        params = {
-            "index": "equities",
-            "from_date": from_date.strftime("%d-%m-%Y"),
-            "to_date": today.strftime("%d-%m-%Y"),
-        }
-        payload = fetch_json(session, NSE_API_URL, params=params)
-        rows = normalize_rows(payload)
+        session = make_session()
+        filings = fetch_filing_list(session, start_date, today)
+        all_rows = []
+        for index, filing in enumerate(filings, start=1):
+            reference = filing.get("xmlFileName")
+            if not reference:
+                continue
+            xml_text = fetch_xbrl(session, reference)
+            rows = parse_xbrl_facts(xml_text)
+            filing_id = str(filing.get("appId") or reference)
+            symbol = str(filing.get("symbol") or "").strip()
+            broadcast = str(filing.get("broadcastDateTime") or "")
+            for row in rows:
+                row["_filing_id"] = filing_id
+                row["_symbol"] = symbol
+                row["_broadcast"] = broadcast
+                all_rows.append(row)
+            if index % 10 == 0:
+                LOG.info("Downloaded XBRL details for %d/%d filings; disclosure rows=%d", index, len(filings), len(all_rows))
+            time.sleep(0.15)  # avoid hammering NSE
     except Exception:
-        LOG.exception("Unable to retrieve or parse NSE PIT disclosures.")
+        LOG.exception("Unable to retrieve or parse current NSE PIT XBRL disclosures.")
         return 1
 
-    # Treat NSE date-only fields as Indian calendar dates.
-    start_date = from_date
-    end_date = today
-    eligible: list[dict] = []
-    for row in rows:
-        date_value = first(
-            row, "acqtoDt", "acqfromDt", "acqDt",
-            "dateOfAcquisition", "transactionDate", "date", "intimDt",
-            "transaction_to", "transaction_from", "dateOfTransaction"
-        )
-        parsed = parse_date(date_value)
-        if parsed and not (start_date <= parsed.date() <= end_date):
-            continue
-        if not is_promoter(row):
-            continue
-        if not is_market_buy(row):
-            # The Annual PIT feed may identify a BUY without exposing execution
-            # mode. Never treat a missing mode as proof of an open-market trade.
-            LOG.debug("Skipping disclosure without an explicit BUY + Market mode.")
+    LOG.info("Parsed %d XBRL disclosure rows from %d NSE filings.", len(all_rows), len(filings))
+    eligible = []
+    for row in all_rows:
+        if not is_promoter(row) or not is_market_buy(row):
             continue
         value = transaction_value(row)
-        if value >= MIN_VALUE_INR:
-            eligible.append(row)
-
-    if not eligible:
-        LOG.info(
-            "No confirmed promoter open-market buy disclosures ≥ ₹%.0f found. "
-            "Rows without an explicit Market acquisition mode are intentionally skipped.",
-            MIN_VALUE_INR,
-        )
-        return 0
+        if value <= 0:
+            LOG.warning(
+                "Skipping disclosure with missing/non-positive XBRL value: symbol=%s person=%s",
+                row.get("_symbol"), row.get("NameOfThePerson"),
+            )
+            continue
+        row["_value"] = value
+        eligible.append(row)
 
     already_alerted = load_state()
     grouped: dict[tuple[str, str], list[dict]] = {}
     for row in eligible:
-        if record_key(row) in already_alerted:
+        key = record_key(row)
+        if key in already_alerted:
             continue
-        symbol = str(first(row, "symbol", "scSymbol", "companySymbol", "ticker") or "UNKNOWN").strip()
-        company = str(first(row, "company", "companyName", "nameOfCompany", "company_name", "issuerName") or symbol).strip()
+        symbol = str(row.get("_symbol") or row.get("Symbol") or "UNKNOWN").strip()
+        company = str(row.get("NameOfTheCompany") or symbol).strip()
         grouped.setdefault((symbol, company), []).append(row)
 
     sent_keys: set[str] = set()
     for (symbol, company), company_rows in grouped.items():
-        total = sum(transaction_value(row) for row in company_rows)
+        total = sum(row["_value"] for row in company_rows)
         if total < MIN_VALUE_INR:
             continue
         send_telegram(format_alert(symbol, company, company_rows, total))
         sent_keys.update(record_key(row) for row in company_rows)
-        LOG.info("Sent alert for %s (%s), total ₹%.0f", company, symbol, total)
+        LOG.info("Sent promoter-buy alert: %s (%s), ₹%.0f across %d disclosures", company, symbol, total, len(company_rows))
 
     if sent_keys:
         save_state(already_alerted | sent_keys)
     else:
-        LOG.info("No new qualifying disclosures to alert.")
+        LOG.info("No new promoter open-market buy disclosures ≥ ₹%.0f found in the %d-day window.", MIN_VALUE_INR, LOOKBACK_DAYS)
     return 0
 
 
