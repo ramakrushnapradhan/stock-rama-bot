@@ -415,11 +415,10 @@ async function currentLtp(env, symbol) {
 
 async function createExitOco(env, trade, proposal, quantity) {
   const ltp = await currentLtp(env, proposal.symbol);
-  const stopTick = tickSizeForPrice(proposal.stop);
-  const targetTick = tickSizeForPrice(proposal.target);
-  const stopTrigger = roundDownTick(proposal.stop, stopTick);
+  const instrumentTick = tickSizeForPrice(proposal.entry);
+  const stopTrigger = roundDownTick(proposal.stop, instrumentTick);
   const stopLimit = roundDownTick(Math.max(stopTick, stopTrigger - stopTick * 2), stopTick);
-  const targetTrigger = roundDownTick(proposal.target, targetTick);
+  const targetTrigger = roundDownTick(proposal.target, instrumentTick);
   const targetLimit = targetTrigger;
   if (!(stopTrigger < ltp && ltp < targetTrigger)) {
     throw new Error("Current price ₹" + ltp.toFixed(2) +
@@ -457,8 +456,8 @@ async function protectFilledBuys(env) {
         item.type === "two-leg" && item.condition?.tradingsymbol === proposal.symbol &&
         item.orders?.[0]?.quantity === Number(trade.filled_qty) &&
         item.condition?.trigger_values?.length === 2 &&
-        Math.abs(Number(item.condition.trigger_values[0]) - roundDownTick(proposal.stop)) < 0.001 &&
-        Math.abs(Number(item.condition.trigger_values[1]) - roundDownTick(proposal.target)) < 0.001 &&
+        Math.abs(Number(item.condition.trigger_values[0]) - roundDownTick(proposal.stop, tickSizeForPrice(proposal.entry))) < 0.001 &&
+        Math.abs(Number(item.condition.trigger_values[1]) - roundDownTick(proposal.target, tickSizeForPrice(proposal.entry))) < 0.001 &&
         ["active", "triggered"].includes(item.status)
       );
       if (candidate) {
@@ -607,7 +606,7 @@ export default {
         return json({ ok: true, service: "stock-rama-approval", live_trading_enabled: String(env.LIVE_TRADING_ENABLED) === "true" });
       }
       if (request.method === "GET" && url.pathname === "/kite/login") {
-        requireEnv(env, ["KITE_API_KEY"]);
+        requireEnv(env, ["KITE_API_KEY", "KITE_API_SECRET", "KITE_TOKEN_ENCRYPTION_KEY"]);
         return Response.redirect("https://kite.zerodha.com/connect/login?v=3&api_key=" + encodeURIComponent(env.KITE_API_KEY), 302);
       }
       if (request.method === "GET" && url.pathname === "/kite/callback") {
