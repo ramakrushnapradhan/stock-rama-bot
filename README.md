@@ -1,46 +1,42 @@
 # Stock Rama NSE Insider Alerts
 
-A GitHub Actions bot that checks NSE Prohibition of Insider Trading (PIT) disclosures and sends Telegram alerts for qualifying promoter/promoter-group open-market purchases.
+A GitHub Actions Telegram alert bot for NSE insider-trading disclosures.
 
-> **Important:** Informational monitoring only — not investment advice. Verify every disclosure against the original NSE filing. NSE can change its endpoints, response schema, access controls, or availability. GitHub scheduled jobs can be delayed and are not guaranteed to execute at the exact scheduled minute.
+> **Important — source-data change:** NSE currently displays a separate **Insider Trading (PIT) – Annual** feed. The older detailed API used by the first version of this bot contains fields such as symbol and acquisition mode, but a July 2026 community data-maintainer report says that detailed feed stopped receiving updates after 2 May 2026. The current Annual feed is coarser and does not provide the same symbol/mode detail. Therefore the automatic schedule is intentionally **paused**: do not rely on this repository for current trade alerts until the data-source adapter is updated and tested. See the current [NSE PIT Annual page](https://www.nseindia.com/companies-listing/corporate-filings-pit-annual).
 
-## 1. Configure GitHub Actions
+## Configuration
 
-Open **Settings → Secrets and variables → Actions** in this repository.
+In **Settings → Secrets and variables → Actions**, add:
 
-Add this repository **secret**:
+### Repository secret
+- `TELEGRAM_BOT_TOKEN`: your newly generated Telegram bot token. Never commit it to source code.
 
-- `TELEGRAM_BOT_TOKEN`: your newly generated Telegram bot token. Never commit the token to source code.
-
-Add these repository **variables**:
-
+### Repository variable
 - `TELEGRAM_CHAT_ID`: the destination chat ID. Use the numeric ID of your private chat/group, or the @username of a channel where the bot has permission to post. **Do not use the bot's own username as the destination.**
-- `NSE_PIT_API_URL` (optional): leave unset to use the default NSE PIT API endpoint, `https://www.nseindia.com/api/corporates-pit`. Set this only if NSE changes the endpoint.
 
 The Telegram token previously pasted into chat should be revoked with **@BotFather → /revoke**. Put only the replacement token in the GitHub secret.
 
-## 2. Run the bot
+## Running
 
-The workflow runs on weekdays approximately every 10 minutes during the NSE cash-market session (09:15–15:30 India time). You can also start it manually:
+The GitHub Actions workflow currently supports **manual dispatch only**. Automatic 10-minute scheduling is disabled until the new NSE Annual PIT format can be parsed and its limitations are handled correctly.
 
-**Actions → Stock Rama NSE Insider Alerts → Run workflow**
+Do not manually run the legacy script expecting fresh post-May-2026 disclosures; it uses the old detailed `/api/corporates-pit` feed.
 
-The workflow checks the latest seven calendar days by default.
+## Intended alert criteria
 
-## 3. Alert threshold and matching
+The original requirements were:
+- Promoter or Promoter Group;
+- open-market purchase (not sale, pledge, ESOP, or other mode);
+- aggregate transaction value of at least ₹50 lakh;
+- rolling seven-day lookback;
+- one Telegram alert per new disclosure/company group.
 
-The default threshold is ₹50,00,000 (₹50 lakh). It can be changed through the `MIN_VALUE_INR` environment variable in `.github/workflows/auto_run.yml`. The lookback window is controlled by `LOOKBACK_DAYS`.
+The old detailed NSE schema exposed fields including `personCategory`, `tdpTransactionType`, `acqMode`, `symbol`, `secAcq`, and `secVal`. The current PIT Annual presentation has a different, coarser structure; the exact open-market filter and symbol mapping cannot safely be assumed from the old schema.
 
-The bot filters disclosures where the person category is Promoters or Promoter Group, the transaction is a buy, and the acquisition mode is a market transaction. It aggregates new qualifying rows by company and symbol before applying the threshold. It uses the NSE PIT fields such as `personCategory`, `tdpTransactionType`, `acqMode`, `secAcq`, and `secVal`.
+## Duplicate-alert state
 
-## 4. Duplicate alerts
+`alerted_transactions.json` stores disclosure keys already sent. GitHub Actions commits changes to this file after a successful run.
 
-The file `alerted_transactions.json` stores keys for disclosures already sent. GitHub Actions commits this state file after a successful alert, reducing repeat notifications on later runs.
+## Next compatibility step
 
-## 5. Troubleshooting
-
-- **Missing token:** check that the repository secret is named exactly `TELEGRAM_BOT_TOKEN`.
-- **Missing destination:** set `TELEGRAM_CHAT_ID` to the user/group/channel that should receive alerts. The bot must have been started by a private-chat recipient or have permission to post in the channel/group.
-- **NSE 403/429 or HTML response:** NSE may be rate-limiting automated requests or changing its anti-bot checks. Review the Actions log.
-- **Unexpected response shape:** inspect the latest NSE PIT API response and update the field mapping in `nse_insider_bot.py`.
-
+Update the source adapter to read the current PIT Annual feed and explicitly label what it can and cannot determine. In particular, if market mode is not supplied, the bot must not describe a disclosure as an open-market purchase. If symbol mapping is unavailable, alerts should identify the company name instead of guessing a ticker.
