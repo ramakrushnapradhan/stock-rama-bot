@@ -6,9 +6,10 @@ A GitHub Actions Telegram bot that monitors NSE Regulation 7(2) insider disclosu
 
 1. Reads NSE's current insider-trading filing list and downloads the XBRL disclosures.
 2. Filters promoter/promoter-group market purchases and aggregates disclosed value by company over a rolling 7-day window.
-3. For companies with at least ₹50 lakh of qualifying purchases, fetches daily adjusted price history and evaluates a 2–4 week swing setup.
+3. For companies with at least ₹5 lakh of qualifying purchases, fetches daily adjusted price history and evaluates a 2–4 week swing setup.
 4. Sends a Telegram alert with BUY SETUP / WAIT / AVOID / INSUFFICIENT DATA, score, entry trigger, maximum acceptable entry, stop, targets, position sizing guidance and a historical technical backtest.
-5. Stores sent disclosure keys to avoid repeat alerts.
+5. Independently scans the NIFTY 500 each run, so technical swing candidates can be found even when there are no promoter disclosures.
+6. Stores sent disclosure keys to avoid repeat promoter alerts.
 
 ## Swing strategy — moderate risk
 
@@ -34,7 +35,11 @@ The entry is a breakout trigger just above the signal day's high. The bot also g
 
 Position sizing uses at most 1% of configured trading capital as planned loss:
 `shares = floor((capital × 1%) / (entry − stop))`
-The repository default `TRADING_CAPITAL_INR=0` intentionally disables a rupee share-count suggestion until the owner sets their own capital amount. The 1% is a risk budget, not a guarantee; gaps can cause larger losses.
+The workflow currently uses a ₹10,000 total capital ceiling for position sizing. Shares are limited by both the 1% risk budget (₹100 per trade) and the total capital ceiling. Change `TRADING_CAPITAL_INR` to ₹5,000 if that is the amount you want to allocate. The 1% is a risk budget, not a guarantee; gaps can cause larger losses.
+
+## Independent market scanner
+
+The workflow downloads the NIFTY 500 constituent list and scans those liquid NSE-listed stocks using daily technical indicators, without requiring promoter purchases. It ranks candidates, then runs the five-year technical backtest on the top five candidates before sending Telegram analysis. This is a broad liquid-stock universe, not every security listed on NSE; smaller and less-liquid stocks are not included.
 
 ## Backtesting
 
@@ -66,9 +71,9 @@ In **Settings → Secrets and variables → Actions**:
 
 | Variable | Default | Meaning |
 |---|---:|---|
-| `MIN_VALUE_INR` | 5000000 | Minimum promoter purchase aggregate |
+| `MIN_VALUE_INR` | 500000 | Minimum promoter purchase aggregate (₹5 lakh) |
 | `LOOKBACK_DAYS` | 7 | Filing lookback |
-| `TRADING_CAPITAL_INR` | 0 | Capital for share sizing; 0 disables quantity |
+| `TRADING_CAPITAL_INR` | 10000 | Maximum capital allocated per trade (₹10,000 default) |
 | `RISK_PER_TRADE_PCT` | 1.0 | Planned capital risk per trade |
 | `BACKTEST_COST_BPS` | 30 | Estimated round-trip cost in basis points |
 | `SWING_MAX_HOLD_DAYS` | 20 | Maximum backtest holding sessions |
